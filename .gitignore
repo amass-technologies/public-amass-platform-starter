@@ -1,0 +1,5 @@
+__pycache__/
+baml_client/
+.env
+.DS_Store
+settings.local.json
