@@ -3,7 +3,7 @@
 An interactive agent for querying scientific literature and clinical trials via the [amass platform](https://platform.amass.tech/).
 Get your `AMASS_API_KEY` at https://platform.amass.tech/ and starter credits will be added to your account.
 
-![agent movie](/assets/intro.mp4)
+https://github.com/user-attachments/assets/e92ab012-10a0-4c76-95be-c3b8e348f033
 
 ## Quickstart
 
