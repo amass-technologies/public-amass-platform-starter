@@ -47,7 +47,7 @@ TOOL_BUDGET = 5
 # Per-observation trimming budget inside the scratchpad passed back to RouteQuery.
 SCRATCH_RESULT_CHAR_BUDGET = 2000
 # Total observation payload budget passed into SummarizeResult at loop exit.
-OBSERVATIONS_JSON_CHAR_BUDGET = 40000
+OBSERVATIONS_JSON_CHAR_BUDGET = 400000
 
 # .env is loaded once at import time so AMASS_API_KEY and other vars are available globally.
 load_dotenv()
@@ -113,7 +113,6 @@ TRIAL_GET_FIELDS_KEEP = (
     "isFdaRegulatedDrug", "isFdaRegulatedDevice",
     "armGroups", "referenceAmassIds", "oversightHasDmc",
 )
-FULLTEXT_CHAR_BUDGET = 15000
 MAX_CROSS_CORE_REFS = 5
 
 
@@ -167,10 +166,6 @@ def trim_paper_search_record(rec: dict[str, Any]) -> dict[str, Any]:
 
 def trim_paper_record(rec: dict[str, Any]) -> dict[str, Any]:
     trimmed = dict(rec)
-    ft = trimmed.get("fulltext")
-    if isinstance(ft, str) and len(ft) > FULLTEXT_CHAR_BUDGET:
-        trimmed["fulltext"] = ft[:FULLTEXT_CHAR_BUDGET] + " …[truncated]"
-        trimmed["_fulltextTruncated"] = True
     trimmed.pop("meshIds", None)
     trimmed.pop("substanceIds", None)
     return trimmed
@@ -412,8 +407,7 @@ def print_amass_results(
                 lines.append(f"  [dim](+{len(authors_meta) - 6} more authors)[/dim]")
             ft = r.get("fulltext") or ""
             if ft:
-                tag = " [yellow]TRUNCATED[/yellow]" if r.get("_fulltextTruncated") else ""
-                lines.append(f"[green]fulltext: {len(ft):,} chars[/green]{tag}")
+                lines.append(f"[green]fulltext: {len(ft):,} chars[/green]")
 
     elif tool_name == "search_trials":
         border = "cyan"
@@ -504,7 +498,12 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
     if tool_name in ("get_paper",) and isinstance(tool_result, dict):
         keep = ("amassId", "title", "authors", "publicationDate", "journal",
                 "citationCount", "journalQuality", "isRetracted")
-        return {k: tool_result.get(k) for k in keep if k in tool_result}
+        trimmed = {k: tool_result.get(k) for k in keep if k in tool_result}
+        ft = tool_result.get("fulltext")
+        if isinstance(ft, str):
+            trimmed["fulltextChars"] = len(ft)
+            trimmed["fulltextPreview"] = ft[:400] + (" …[truncated]" if len(ft) > 400 else "")
+        return trimmed
     if tool_name in ("get_trial",) and isinstance(tool_result, dict):
         keep = ("amassId", "nctId", "briefTitle", "sponsorName", "phase", "overallStatus",
                 "conditions", "interventionNames", "enrollment", "_references")
@@ -517,7 +516,8 @@ def render_scratch(observations: list[dict[str, Any]]) -> str:
         return "(empty)"
     blocks: list[str] = []
     for i, obs in enumerate(observations, 1):
-        payload = json.dumps(obs["result"], default=str, ensure_ascii=False)
+        scratch_result = _trim_for_scratch(obs["tool"], obs["result"])
+        payload = json.dumps(scratch_result, default=str, ensure_ascii=False)
         if len(payload) > SCRATCH_RESULT_CHAR_BUDGET:
             payload = payload[:SCRATCH_RESULT_CHAR_BUDGET] + " …[truncated]"
         blocks.append(f"[step {i}] {obs['call']}\n→ {payload}")
@@ -557,7 +557,7 @@ async def turn(
         observations.append({
             "tool": tool_name,
             "call": _format_call(route),
-            "result": _trim_for_scratch(tool_name, tool_result),
+            "result": tool_result,
         })
     else:
         # Budget exhausted. Inject a fake user message into the scratch and call the router
