@@ -66,6 +66,13 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - BioMedCore (search_papers / get_paper / lookup_paper) — published scientific literature.
       - TrialCore  (search_trials / get_trial / lookup_trial) — clinical trials on ClinicalTrials.gov.
 
+    CRITICAL — read the scratchpad FIRST on every step:
+      - The scratchpad lists every tool call already made this turn together with its result.
+      - If any prior step in the scratchpad already answers the user, pick final_answer now.
+      - NEVER repeat a call that is already in the scratchpad.
+      - If the scratchpad ends with a fake "user:" message telling you the tool budget is
+        exhausted, obey it and pick final_answer.
+
     Tools:
       - search_papers: topic search over BioMedCore. Also use this for "what else has author X
         written" — put the author name (and any topic hint) into the query string.
@@ -126,8 +133,6 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
         Do NOT apply filters just because the topic sounds foundational or important.
       - Never invent an amassId; only use IDs that appear in the Recent results block or the
         scratchpad.
-      - If the scratchpad already answers the user's question, pick final_answer — do not make
-        redundant tool calls.
 
     {{ _.role("user") }}
     Conversation so far:
@@ -136,7 +141,8 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
     Recent results (numbered; use these to resolve references like #2):
     {{ last_results }}
 
-    Scratchpad (tool calls + results already made this turn):
+    Scratchpad (tool calls + results already made this turn — do NOT repeat any call that appears
+    here; if it already answers the user, pick final_answer):
     {{ scratch }}
 
     New user message:
