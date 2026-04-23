@@ -1,42 +1,98 @@
 // Learn more about clients at https://docs.boundaryml.com/docs/snippets/clients/overview
 //
-// All active clients route through the a LiteLLM proxy (openai-generic provider),
-// so only LITELLM_PROXY_URL and LITELLM_PROXY_KEY are required.
+// The functions in agent.baml call native providers directly through two
+// fallback chains: Anthropic → OpenAI → Google AI. Set ANY ONE of
+// ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY to run the agent —
+// the fallback tries each leg in order and uses the first one whose call
+// succeeds. Setting more keys just adds resilience.
 //
-// ⚠️  LOCAL ADJUSTMENT REQUIRED
-// The active client definitions below target the a LiteLLM proxy and the model
-// IDs deployed there. If you are running this demo outside that environment
-// you MUST edit this file before `baml-cli generate`:
-//   • swap `provider` / `base_url` / `api_key` to your own gateway or a
-//     direct provider (e.g. `openai`, `anthropic`), and
-//   • replace the `model` strings with IDs your endpoint actually serves.
-// Any function referencing a client defined here will fail at runtime
-// until these values match your local setup.
+// LiteLLM proxy clients are defined further below and are NOT referenced by
+// any function by default. To route through a LiteLLM proxy instead, set
+// LITELLM_PROXY_URL + LITELLM_PROXY_KEY and swap the `client` field in
+// agent.baml:
+//   RouteQuery       → LiteLLMClientHaiku45FallbackToGPT54mini
+//   SummarizeResult  → LiteLLMClientSonnet46FallbackToGPT54
+// Then re-run `baml-cli generate`.
 //
-// ── Direct provider examples (commented out) ──────────────────────────────
-// Uncomment and set the matching env vars to bypass the LiteLLM proxy and
-// call OpenAI or Anthropic directly. Then reference the client by name from
-// a function's `client` field (and re-run `baml-cli generate`).
+// ── Direct provider clients ───────────────────────────────────────────────
 
-// client<llm> MyOpenAI {
-//   provider "openai"
-//   options {
-//     api_key env.OPENAI_API_KEY
-//     model "gpt-5.4"
-//   }
-// }
+client<llm> MyAnthropicSonnet46 {
+  provider "anthropic"
+  options {
+    api_key env.ANTHROPIC_API_KEY
+    model "claude-sonnet-4-6"
+  }
+}
 
-// client<llm> MyAnthropic {
-//   provider "anthropic"
-//   options {
-//     api_key env.ANTHROPIC_API_KEY
-//     model "claude-sonnet-4-6-20250514"
-//   }
-// }
+client<llm> MyAnthropicHaiku45 {
+  provider "anthropic"
+  options {
+    api_key env.ANTHROPIC_API_KEY
+    model "claude-haiku-4-5"
+  }
+}
 
-// ── GPT-5.4 family ─────────────────────────────────────────────────────────
+client<llm> MyOpenAIGPT54 {
+  provider "openai"
+  options {
+    api_key env.OPENAI_API_KEY
+    model "gpt-5.4"
+  }
+}
 
-client<llm> AmassLiteLLMClientGPT54 {
+client<llm> MyOpenAIGPT54Mini {
+  provider "openai"
+  options {
+    api_key env.OPENAI_API_KEY
+    model "gpt-5.4-mini"
+  }
+}
+
+client<llm> MyGoogleAIGemini25Pro {
+  provider google-ai
+  options {
+    api_key env.GOOGLE_API_KEY
+    model "gemini-2.5-pro"
+  }
+}
+
+client<llm> MyGoogleAIGemini25Flash {
+  provider google-ai
+  options {
+    api_key env.GOOGLE_API_KEY
+    model "gemini-2.5-flash"
+  }
+}
+
+// ── Native provider fallback compositions ─────────────────────────────────
+// Anthropic first, OpenAI second, Google third — all calling native APIs
+// directly. Used by the BAML functions in agent.baml.
+
+client<llm> MyAnthropicSonnetFallbackToOpenAIToGoogle {
+  provider fallback
+  options {
+    strategy [
+      MyAnthropicSonnet46
+      MyOpenAIGPT54
+      MyGoogleAIGemini25Pro
+    ]
+  }
+}
+
+client<llm> MyAnthropicHaikuFallbackToOpenAIMiniToGoogle {
+  provider fallback
+  options {
+    strategy [
+      MyAnthropicHaiku45
+      MyOpenAIGPT54Mini
+      MyGoogleAIGemini25Flash
+    ]
+  }
+}
+
+// ── GPT-5.4 family via LiteLLM proxy ─────────────────────────────────────────────────────────
+
+client<llm> LiteLLMClientGPT54 {
   provider "openai-generic"
   options {
     base_url env.LITELLM_PROXY_URL
@@ -45,7 +101,7 @@ client<llm> AmassLiteLLMClientGPT54 {
   }
 }
 
-client<llm> AmassLiteLLMClientGPT54mini {
+client<llm> LiteLLMClientGPT54mini {
   provider "openai-generic"
   options {
     base_url env.LITELLM_PROXY_URL
@@ -55,10 +111,10 @@ client<llm> AmassLiteLLMClientGPT54mini {
 }
 
 
-// ── Anthropic family ─────────────────────────
+// ── Anthropic family via LiteLLM proxy ─────────────────────────
 
 
-client<llm> AmassLiteLLMClientSonnet46 {
+client<llm> LiteLLMClientSonnet46 {
   provider "openai-generic"
   options {
     base_url env.LITELLM_PROXY_URL
@@ -69,7 +125,7 @@ client<llm> AmassLiteLLMClientSonnet46 {
 }
 
 
-client<llm> AmassLiteLLMClientHaiku45 {
+client<llm> LiteLLMClientHaiku45 {
   provider "openai-generic"
   options {
     base_url env.LITELLM_PROXY_URL
@@ -79,24 +135,24 @@ client<llm> AmassLiteLLMClientHaiku45 {
   }
 }
 
-// ── Fallback compositions ──────────────────────────────────────────────────
+// ── Fallback compositions via LiteLLM proxy ──────────────────────────────────────────────────
 
-client<llm> AmassLiteLLMClientSonnet46FallbackToGPT54 {
+client<llm> LiteLLMClientSonnet46FallbackToGPT54 {
   provider fallback
   options {
     strategy [
-      AmassLiteLLMClientSonnet46
-      AmassLiteLLMClientGPT54
+      LiteLLMClientSonnet46
+      LiteLLMClientGPT54
     ]
   }
 }
 
-client<llm> AmassLiteLLMClientHaiku45FallbackToGPT54mini {
+client<llm> LiteLLMClientHaiku45FallbackToGPT54mini {
   provider fallback
   options {
     strategy [
-      AmassLiteLLMClientHaiku45
-      AmassLiteLLMClientGPT54mini
+      LiteLLMClientHaiku45
+      LiteLLMClientGPT54mini
     ]
   }
 }

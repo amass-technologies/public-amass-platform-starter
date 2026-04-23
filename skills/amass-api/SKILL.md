@@ -18,7 +18,7 @@ The full API reference is bundled in `AMASS.md`. Read it on demand — it's self
 
 Use this skill for **any** biomedical literature or clinical trial question where structured search would help. Examples:
 
-- "Find recent high-impact papers on CAR-T therapy" → BioMedCore search with `minPublicationDate` + `minJournalQuality`
+- "Find recent high-impact papers on CAR-T therapy" → BioMedCore search with `minPublicationDate` + `minJournalQualityJufo`
 - "Any recruiting Phase 3 lung cancer trials in Germany?" → TrialCore search with `phase`, `overallStatus`, `facilityCountries`
 - "What's PMID 38123456 about?" → BioMedCore lookup by PMID, then get-by-ID
 - "Summarize NCT06012345" → TrialCore lookup by NCT ID, then get-by-ID

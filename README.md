@@ -55,7 +55,7 @@ The router has a budget of 5 tool calls per turn. If exhausted, a nudge is injec
 ```
 baml_src/
   agent.baml       # Tool schemas, RouteQuery + SummarizeResult prompts, tests
-  clients.baml     # LLM client declarations (proxy-routed) and retry policies
+  clients.baml     # LLM client declarations (native Anthropic/OpenAI/Google + optional LiteLLM) and retry policies
   generators.baml  # Code-gen config (Python/Pydantic, async by default)
 baml_client/       # Generated — do not edit (gitignored)
 amass.py           # Async HTTP client for the amass platform API
@@ -71,16 +71,17 @@ AMASS.md           # amass platform API reference
 | `AMASS_API_KEY` | Yes | Authenticates against the amass platform API |
 | `BAML_LOG` | No | Set to `warn` to silence per-call prompt/reply dumps |
 
-### LLM connection (proxy or direct) variables
+### LLM API keys
 
-> ⚠️ **Local adjustment required.** See 'Using your own LLM clients' below.
+By default, the agent calls native providers through a fallback chain: **Anthropic → OpenAI → Google AI**. Set **any one** of the three API keys below to run the agent — the fallback tries each leg in order and uses the first one whose call succeeds. Setting more keys is optional and adds resilience.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `LITELLM_PROXY_URL` | For LiteLLM proxy | Base URL for the LiteLLM proxy that routes LLM calls |
-| `LITELLM_PROXY_KEY` | For LiteLLM proxy | API key for the LiteLLM proxy |
-| `OPENAI_API_KEY` | For calling OpenAI directly | Used when bypassing the proxy |
-| `ANTHROPIC_API_KEY` | For calling Anthropic directly | Used when bypassing the proxy |
+| `ANTHROPIC_API_KEY` | One of the three | First leg of the default fallback chain |
+| `OPENAI_API_KEY` | One of the three | Second leg of the default fallback chain |
+| `GOOGLE_API_KEY` | One of the three | Third leg of the default fallback chain |
+| `LITELLM_PROXY_URL` | Only if using LiteLLM | Base URL for a LiteLLM proxy — see ['Using a LiteLLM proxy instead'](#using-a-litellm-proxy-instead) |
+| `LITELLM_PROXY_KEY` | Only if using LiteLLM | API key for the LiteLLM proxy |
 
 ## LLM overview
 
@@ -95,65 +96,23 @@ The workflow:
 
 ### Using your own LLM clients
 
-> ⚠️ **Local adjustment required.** The client blocks in `baml_src/clients.baml` target a specific LiteLLM proxy and the model IDs deployed there. If you are running this demo outside that environment, edit `clients.baml` before `baml-cli generate`: swap `provider` / `base_url` / `api_key` to your own gateway or a direct provider, and replace the `model` strings with IDs your endpoint actually serves. Any function referencing an unmatched client will fail at runtime.
+BAML clients are declared in `baml_src/clients.baml`. Out of the box, `clients.baml` defines native-provider clients for Anthropic (Sonnet 4.6, Haiku 4.5), OpenAI (GPT-5.4, GPT-5.4-mini), and Google AI (Gemini 2.5 Pro, Gemini 2.5 Flash), and composes them into two fallback chains that the functions in `agent.baml` reference:
 
-BAML clients are declared in `baml_src/clients.baml`. Each `client<llm>` block specifies a provider and connection options. For convenience, `clients.baml` already includes commented-out templates for calling OpenAI and Anthropic directly — uncomment and adapt them, or add your own client blocks following the patterns below:
+- `MyAnthropicHaikuFallbackToOpenAIMiniToGoogle` — Haiku 4.5 → GPT-5.4-mini → Gemini 2.5 Flash (used by `RouteQuery`, the fast per-step router)
+- `MyAnthropicSonnetFallbackToOpenAIToGoogle` — Sonnet 4.6 → GPT-5.4 → Gemini 2.5 Pro (used by `SummarizeResult`, the end-of-turn synthesizer)
 
-**OpenAI directly:**
+Each chain tries Anthropic first, then OpenAI, then Google AI. Set any one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY` and the agent works; set more for redundancy and resilience.
 
-```baml
-client<llm> MyOpenAI {
-  provider "openai"
-  options {
-    api_key env.OPENAI_API_KEY
-    model "gpt-5.4"
-  }
-}
-```
+#### Using a LiteLLM proxy instead
 
-**Anthropic directly:**
+If you prefer to route calls through a [LiteLLM](https://docs.litellm.ai/) proxy, `clients.baml` also defines proxy-backed equivalents (`LiteLLMClient...`) and two fallback compositions that chain the proxy's Anthropic model to its OpenAI model. To switch:
 
-```baml
-client<llm> MyAnthropic {
-  provider "anthropic"
-  options {
-    api_key env.ANTHROPIC_API_KEY
-    model "claude-sonnet-4-6-20250514"
-  }
-}
-```
+1. Set `LITELLM_PROXY_URL` and `LITELLM_PROXY_KEY` in your `.env`.
+2. Edit `baml_src/agent.baml` and change the `client` field on each function:
+   - `RouteQuery` → `LiteLLMClientHaiku45FallbackToGPT54mini`
+   - `SummarizeResult` → `LiteLLMClientSonnet46FallbackToGPT54`
+3. Re-run `uv run baml-cli generate`.
 
-**Any OpenAI-compatible endpoint** (Azure, Together, local vLLM, etc.):
-
-```baml
-client<llm> MyCustom {
-  provider "openai-generic"
-  options {
-    base_url env.MY_ENDPOINT_URL
-    api_key env.MY_ENDPOINT_KEY
-    model "my-model-name"
-  }
-}
-```
-
-Then wire a client to a function by setting the `client` field:
-
-```baml
-function MyFunction(input: string) -> string {
-  client MyOpenAI
-  prompt #"..."#
-}
-```
-
-You can also compose clients with **fallback** (try the first, fall back to the second) and **round-robin** strategies:
-
-```baml
-client<llm> MyFallback {
-  provider fallback
-  options {
-    strategy [MyAnthropic, MyOpenAI]
-  }
-}
-```
+The proxy-backed `model` strings (e.g. `eu.anthropic.claude-sonnet-4-6`) must match IDs your proxy actually serves — adjust them in `clients.baml` if your deployment uses different names.
 
 After any change to `.baml` files, re-run `uv run baml-cli generate`.

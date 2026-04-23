@@ -57,7 +57,7 @@ class FinalAnswer {
 }
 
 function RouteQuery(user_query: string, history: string, last_results: string, scratch: string) -> SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | FinalAnswer {
-  client AmassLiteLLMClientHaiku45FallbackToGPT54mini
+  client MyAnthropicHaikuFallbackToOpenAIMiniToGoogle
   prompt #"
     {{ _.role("system") }}
     You are the router for an agent that may call multiple tools per user turn against the amass
@@ -147,7 +147,7 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
 }
 
 function SummarizeResult(user_query: string, history: string, observations_json: string) -> string {
-  client AmassLiteLLMClientSonnet46FallbackToGPT54
+  client MyAnthropicSonnetFallbackToOpenAIToGoogle
   prompt #"
     {{ _.role("system") }}
     You turn raw amass platform API results into a concise, user-facing reply. The observations
@@ -314,7 +314,7 @@ test TestSummarizeSearch {
   args {
     user_query "What are the hallmarks of cancer and how have they changed over time?"
     history ""
-    observations_json "[{\"tool\":\"search_papers\",\"call\":\"search_papers(query='hallmarks of cancer', limit=10)\",\"result\":[{\"amassId\":\"AMBC_ex001\",\"title\":\"The Hallmarks of Cancer\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2000-01-07\",\"citationCount\":52000,\"journalQuality\":3,\"isRetracted\":false,\"abstract\":\"We suggest six hallmarks of cancer: sustained proliferative signaling, evading growth suppressors, resisting cell death, enabling replicative immortality, inducing angiogenesis, and activating invasion and metastasis.\"},{\"amassId\":\"AMBC_ex002\",\"title\":\"Hallmarks of Cancer: The Next Generation\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2011-03-04\",\"citationCount\":48000,\"journalQuality\":3,\"isRetracted\":false,\"abstract\":\"An updated framework adds reprogramming energy metabolism and evading immune destruction as emerging hallmarks.\"},{\"amassId\":\"AMBC_ex003\",\"title\":\"Hallmarks of Cancer: New Dimensions\",\"authors\":[\"Hanahan D\"],\"journal\":\"Cancer Discovery\",\"publicationDate\":\"2022-01-01\",\"citationCount\":6500,\"journalQuality\":3,\"isRetracted\":false,\"abstract\":\"Four new dimensions: unlocking phenotypic plasticity, nonmutational epigenetic reprogramming, polymorphic microbiomes, and senescent cells.\"}]}]"
+    observations_json "[{\"tool\":\"search_papers\",\"call\":\"search_papers(query='hallmarks of cancer', limit=10)\",\"result\":[{\"amassId\":\"AMBC_ex001\",\"title\":\"The Hallmarks of Cancer\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2000-01-07\",\"citationCount\":52000,\"journalQualityJufo\":3,\"isRetracted\":false,\"abstract\":\"We suggest six hallmarks of cancer: sustained proliferative signaling, evading growth suppressors, resisting cell death, enabling replicative immortality, inducing angiogenesis, and activating invasion and metastasis.\"},{\"amassId\":\"AMBC_ex002\",\"title\":\"Hallmarks of Cancer: The Next Generation\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2011-03-04\",\"citationCount\":48000,\"journalQualityJufo\":3,\"isRetracted\":false,\"abstract\":\"An updated framework adds reprogramming energy metabolism and evading immune destruction as emerging hallmarks.\"},{\"amassId\":\"AMBC_ex003\",\"title\":\"Hallmarks of Cancer: New Dimensions\",\"authors\":[\"Hanahan D\"],\"journal\":\"Cancer Discovery\",\"publicationDate\":\"2022-01-01\",\"citationCount\":6500,\"journalQualityJufo\":3,\"isRetracted\":false,\"abstract\":\"Four new dimensions: unlocking phenotypic plasticity, nonmutational epigenetic reprogramming, polymorphic microbiomes, and senescent cells.\"}]}]"
   }
 }
 
@@ -323,7 +323,7 @@ test TestSummarizeGetPaper {
   args {
     user_query "Show me the full text and author affiliations for #1"
     history "user: What are the hallmarks of cancer?\nassistant: (lists 3 review papers)"
-    observations_json "[{\"tool\":\"get_paper\",\"call\":\"get_paper(amass_id='AMBC_ex002', include_fulltext=True)\",\"result\":{\"amassId\":\"AMBC_ex002\",\"title\":\"Hallmarks of Cancer: The Next Generation\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2011-03-04\",\"citationCount\":48000,\"journalQuality\":3,\"isRetracted\":false,\"abstract\":\"An updated framework ...\",\"fulltext\":\"[truncated] The hallmarks of cancer comprise six biological capabilities acquired during the multistep development of human tumors ...\",\"authorsMetadata\":[{\"name\":\"Hanahan D\",\"nameRaw\":\"Douglas Hanahan\",\"position\":0,\"affiliations\":[{\"name\":\"Swiss Institute for Experimental Cancer Research\",\"countryCode\":\"CH\"}]},{\"name\":\"Weinberg RA\",\"nameRaw\":\"Robert A. Weinberg\",\"position\":1,\"affiliations\":[{\"name\":\"Whitehead Institute for Biomedical Research\",\"countryCode\":\"US\"}]}]}}]"
+    observations_json "[{\"tool\":\"get_paper\",\"call\":\"get_paper(amass_id='AMBC_ex002', include_fulltext=True)\",\"result\":{\"amassId\":\"AMBC_ex002\",\"title\":\"Hallmarks of Cancer: The Next Generation\",\"authors\":[\"Hanahan D\",\"Weinberg RA\"],\"journal\":\"Cell\",\"publicationDate\":\"2011-03-04\",\"citationCount\":48000,\"journalQualityJufo\":3,\"isRetracted\":false,\"abstract\":\"An updated framework ...\",\"fulltext\":\"[truncated] The hallmarks of cancer comprise six biological capabilities acquired during the multistep development of human tumors ...\",\"authorsMetadata\":[{\"name\":\"Hanahan D\",\"nameRaw\":\"Douglas Hanahan\",\"position\":0,\"affiliations\":[{\"name\":\"Swiss Institute for Experimental Cancer Research\",\"countryCode\":\"CH\"}]},{\"name\":\"Weinberg RA\",\"nameRaw\":\"Robert A. Weinberg\",\"position\":1,\"affiliations\":[{\"name\":\"Whitehead Institute for Biomedical Research\",\"countryCode\":\"US\"}]}]}}]"
   }
 }
 
@@ -341,7 +341,7 @@ test TestSummarizeGetTrial {
   args {
     user_query "Tell me more about #2"
     history "user: Find Phase 3 lung cancer trials\nassistant: (lists trials)"
-    observations_json "[{\"tool\":\"get_trial\",\"call\":\"get_trial(amass_id='AMTC_ex002', include_outcomes=True)\",\"result\":{\"amassId\":\"AMTC_ex002\",\"nctId\":\"NCT05000002\",\"briefTitle\":\"Osimertinib in EGFRm NSCLC\",\"officialTitle\":\"A Phase III Study of Adjuvant Osimertinib in EGFR-Mutant NSCLC\",\"sponsorName\":\"AstraZeneca\",\"collaborators\":[\"Memorial Sloan Kettering\"],\"phase\":\"PHASE3\",\"overallStatus\":\"RECRUITING\",\"studyType\":\"INTERVENTIONAL\",\"startDate\":\"2023-04-01\",\"completionDate\":\"2028-12-31\",\"enrollment\":850,\"conditions\":[\"Non-Small Cell Lung Cancer\",\"EGFR Mutation\"],\"interventionTypes\":[\"DRUG\",\"DRUG\"],\"interventionNames\":[\"Osimertinib\",\"Placebo\"],\"facilityCountries\":[\"US\",\"JP\",\"GB\"],\"primaryOutcomeMeasures\":[\"Disease-Free Survival\",\"Overall Survival\"],\"designAllocation\":\"RANDOMIZED\",\"designInterventionModel\":\"PARALLEL\",\"designPrimaryPurpose\":\"TREATMENT\",\"designMasking\":\"DOUBLE\",\"referenceAmassIds\":[\"AMBC_ref001\"],\"_references\":[{\"amassId\":\"AMBC_ref001\",\"title\":\"Osimertinib in untreated EGFR-mutated advanced NSCLC\",\"authors\":[\"Soria JC\",\"Ohe Y\"],\"journal\":\"NEJM\",\"publicationDate\":\"2018-01-11\",\"citationCount\":3200,\"journalQuality\":3}]}}]"
+    observations_json "[{\"tool\":\"get_trial\",\"call\":\"get_trial(amass_id='AMTC_ex002', include_outcomes=True)\",\"result\":{\"amassId\":\"AMTC_ex002\",\"nctId\":\"NCT05000002\",\"briefTitle\":\"Osimertinib in EGFRm NSCLC\",\"officialTitle\":\"A Phase III Study of Adjuvant Osimertinib in EGFR-Mutant NSCLC\",\"sponsorName\":\"AstraZeneca\",\"collaborators\":[\"Memorial Sloan Kettering\"],\"phase\":\"PHASE3\",\"overallStatus\":\"RECRUITING\",\"studyType\":\"INTERVENTIONAL\",\"startDate\":\"2023-04-01\",\"completionDate\":\"2028-12-31\",\"enrollment\":850,\"conditions\":[\"Non-Small Cell Lung Cancer\",\"EGFR Mutation\"],\"interventionTypes\":[\"DRUG\",\"DRUG\"],\"interventionNames\":[\"Osimertinib\",\"Placebo\"],\"facilityCountries\":[\"US\",\"JP\",\"GB\"],\"primaryOutcomeMeasures\":[\"Disease-Free Survival\",\"Overall Survival\"],\"designAllocation\":\"RANDOMIZED\",\"designInterventionModel\":\"PARALLEL\",\"designPrimaryPurpose\":\"TREATMENT\",\"designMasking\":\"DOUBLE\",\"referenceAmassIds\":[\"AMBC_ref001\"],\"_references\":[{\"amassId\":\"AMBC_ref001\",\"title\":\"Osimertinib in untreated EGFR-mutated advanced NSCLC\",\"authors\":[\"Soria JC\",\"Ohe Y\"],\"journal\":\"NEJM\",\"publicationDate\":\"2018-01-11\",\"citationCount\":3200,\"journalQualityJufo\":3}]}}]"
   }
 }
 
