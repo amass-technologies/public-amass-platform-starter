@@ -89,7 +89,7 @@ EXAMPLE_QUERIES = [
 
 PAPER_SEARCH_FIELDS_KEEP = (
     "amassId", "pmid", "doi", "title", "authors", "journal",
-    "publicationDate", "citationCount", "journalQuality",
+    "publicationDate", "citationCount", "journalQualityJufo",
     "hasFulltext", "isRetracted", "abstract",
 )
 TRIAL_SEARCH_FIELDS_KEEP = (
@@ -378,7 +378,7 @@ def print_amass_results(
                 journal = escape((r.get("journal") or "?").strip() or "?")
                 amass_id = r.get("amassId") or "?"
                 cites = r.get("citationCount")
-                jq = r.get("journalQuality")
+                jq = r.get("journalQualityJufo")
                 ret = "[bold red]RETRACTED [/bold red]" if r.get("isRetracted") else ""
                 ft = " [green]★ fulltext[/green]" if r.get("hasFulltext") else ""
                 lines.append(f" [bold]{i:>2}.[/bold] {ret}{title}")
@@ -393,7 +393,7 @@ def print_amass_results(
             ret = "[bold red]RETRACTED [/bold red]" if r.get("isRetracted") else ""
             lines.append(f"{ret}[bold]{escape((r.get('title') or '(untitled)').strip())}[/bold]")
             lines.append(f"{escape(r.get('journal') or '?')} · {(r.get('publicationDate') or '?')[:10]} · {_amass_id(r.get('amassId') or '?')}")
-            lines.append(f"[dim]cites={r.get('citationCount')} · jQ={r.get('journalQuality')}[/dim]")
+            lines.append(f"[dim]cites={r.get('citationCount')} · jQ={r.get('journalQualityJufo')}[/dim]")
             authors_meta = r.get("authorsMetadata") or []
             for a in authors_meta[:6]:
                 affs = a.get("affiliations") or []
@@ -497,7 +497,7 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
         ]
     if tool_name in ("get_paper",) and isinstance(tool_result, dict):
         keep = ("amassId", "title", "authors", "publicationDate", "journal",
-                "citationCount", "journalQuality", "isRetracted")
+                "citationCount", "journalQualityJufo", "isRetracted")
         trimmed = {k: tool_result.get(k) for k in keep if k in tool_result}
         ft = tool_result.get("fulltext")
         if isinstance(ft, str):

@@ -46,7 +46,7 @@ class AmassClient:
         if min_publication_date:
             params.append(("minPublicationDate", min_publication_date))
         if min_journal_quality is not None:
-            params.append(("minJournalQuality", str(min_journal_quality)))
+            params.append(("minJournalQualityJufo", str(min_journal_quality)))
         if is_retracted is not None:
             params.append(("isRetracted", "true" if is_retracted else "false"))
         for inc in include or ():
