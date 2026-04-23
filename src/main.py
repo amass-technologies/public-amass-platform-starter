@@ -93,13 +93,13 @@ PAPER_SEARCH_FIELDS_KEEP = (
     "hasFulltext", "isRetracted", "abstract",
 )
 TRIAL_SEARCH_FIELDS_KEEP = (
-    "amassId", "nctId", "briefTitle", "sponsorName", "phase", "overallStatus",
+    "amassId", "nctId", "acronym", "briefTitle", "sponsorName", "phase", "overallStatus",
     "studyType", "startDate", "completionDate", "enrollment",
     "conditions", "interventionTypes", "interventionNames",
     "facilityCountries", "hasResults", "briefSummary",
 )
 TRIAL_GET_FIELDS_KEEP = (
-    "amassId", "nctId", "briefTitle", "officialTitle", "briefSummary",
+    "amassId", "nctId", "acronym", "briefTitle", "officialTitle", "briefSummary",
     "phase", "overallStatus", "studyType",
     "startDate", "completionDate", "lastUpdateDate", "hasResults",
     "enrollment", "enrollmentType",
@@ -146,7 +146,9 @@ def render_digest(last_results: list[dict[str, Any]]) -> str:
             sponsor = rec.get("sponsorName") or "?"
             phase = rec.get("phase") or "?"
             status = rec.get("overallStatus") or "?"
-            lines.append(f"{i}. {title} — {sponsor} ({phase}, {status}) — {amass_id}")
+            acronym = rec.get("acronym")
+            acronym_tag = f" [{acronym}]" if acronym else ""
+            lines.append(f"{i}.{acronym_tag} {title} — {sponsor} ({phase}, {status}) — {amass_id}")
         else:
             title = rec.get("title") or "(untitled)"
             authors = rec.get("authors") or []
@@ -425,7 +427,9 @@ def print_amass_results(
                 nct = r.get("nctId") or "?"
                 enroll = r.get("enrollment")
                 countries = escape(", ".join(r.get("facilityCountries") or []) or "?")
-                lines.append(f" [bold]{i:>2}.[/bold] {title}")
+                acronym = r.get("acronym")
+                acronym_prefix = f"[bold magenta]{escape(acronym)}[/bold magenta] · " if acronym else ""
+                lines.append(f" [bold]{i:>2}.[/bold] {acronym_prefix}{title}")
                 lines.append(f"     {sponsor} · {phase} · {status}")
                 lines.append(f"     {_amass_id(amass_id)} [dim]· {nct} · enrollment={enroll} · {countries}[/dim]")
 
@@ -435,7 +439,9 @@ def print_amass_results(
             lines.append(f"[red]{escape(tool_result['error'])}[/red]")
         elif isinstance(tool_result, dict):
             r = tool_result
-            lines.append(f"[bold]{escape((r.get('briefTitle') or '(untitled)').strip())}[/bold]")
+            acronym = r.get("acronym")
+            acronym_prefix = f"[bold magenta]{escape(acronym)}[/bold magenta] · " if acronym else ""
+            lines.append(f"{acronym_prefix}[bold]{escape((r.get('briefTitle') or '(untitled)').strip())}[/bold]")
             lines.append(
                 f"{escape(r.get('sponsorName') or '?')} · {escape(r.get('phase') or '?')}"
                 f" · {escape(r.get('overallStatus') or '?')} · {escape(r.get('studyType') or '?')}"
@@ -492,7 +498,7 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
         ]
     if tool_name == "search_trials" and isinstance(tool_result, list):
         return [
-            {k: r.get(k) for k in ("amassId", "nctId", "briefTitle", "sponsorName", "phase", "overallStatus") if k in r}
+            {k: r.get(k) for k in ("amassId", "nctId", "acronym", "briefTitle", "sponsorName", "phase", "overallStatus") if k in r}
             for r in tool_result
         ]
     if tool_name in ("get_paper",) and isinstance(tool_result, dict):
@@ -505,7 +511,7 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
             trimmed["fulltextPreview"] = ft[:400] + (" …[truncated]" if len(ft) > 400 else "")
         return trimmed
     if tool_name in ("get_trial",) and isinstance(tool_result, dict):
-        keep = ("amassId", "nctId", "briefTitle", "sponsorName", "phase", "overallStatus",
+        keep = ("amassId", "nctId", "acronym", "briefTitle", "sponsorName", "phase", "overallStatus",
                 "conditions", "interventionNames", "enrollment", "_references")
         return {k: tool_result.get(k) for k in keep if k in tool_result}
     return tool_result

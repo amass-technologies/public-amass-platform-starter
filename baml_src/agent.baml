@@ -109,8 +109,10 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
           * DOI (e.g. "10.1038/s41586-024-00001-x", "doi:10.xxxx/...") → lookup_paper(doi=...)
           * NCT id (e.g. "NCT06012345") → lookup_trial(nct_id=...)
       - amassId prefix tells you which get tool: AMBC_ → get_paper, AMTC_ → get_trial.
-      - When the user references a result by number (#1) or title, resolve it against the Recent
-        results list below — pick get_paper or get_trial based on the amassId prefix.
+      - When the user references a result by number (#1), title, or trial acronym (e.g. "the
+        ALPHA3 trial", "KEYNOTE-189"), resolve it against the Recent results list below — pick
+        get_paper or get_trial based on the amassId prefix. If no match is in Recent results,
+        fall back to search_trials with the acronym as the query.
       - Query construction (both search tools): keep it short and nominal. Use the 2-6 content
         words that most directly name the topic. Drop conversational words like "how", "what",
         "changed over time", "evolution", "history", "review". The amass index does best with
@@ -182,13 +184,14 @@ function SummarizeResult(user_query: string, history: string, observations_json:
           Note if the fulltext was truncated.
           Prefix with [RETRACTED] if applicable.
       - search_trials: produce a numbered list (1., 2., ...) with, per trial:
-          <briefTitle> — <sponsorName> (<phase>, <overallStatus>)
+          [<acronym>] <briefTitle> — <sponsorName> (<phase>, <overallStatus>)
           amassId: AMTC_...   nctId: NCT...   enrollment: N   country(s): XX, YY
           One-sentence summary from briefSummary if it adds info beyond the title.
+          Omit the [<acronym>] prefix when acronym is null/empty.
         After the list, give a 1-2 sentence synthesis answering the user's question.
       - get_trial / lookup_trial: produce a structured summary:
-          Title (brief + official if they differ), sponsor + collaborators, phase, status,
-          studyType, amassId, nctId, start/completion dates, enrollment.
+          Title (brief + official if they differ), acronym if present, sponsor + collaborators,
+          phase, status, studyType, amassId, nctId, start/completion dates, enrollment.
           Conditions: comma-separated list (cap at 6).
           Interventions: <type>: <name> bullets (cap at 6).
           Design: allocation / model / primaryPurpose / masking when present.
