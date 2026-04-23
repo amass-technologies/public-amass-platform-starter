@@ -1,8 +1,8 @@
 """Interactive BAML-driven agent over the amass platform (BioMedCore + TrialCore).
 
 Usage:
-    uv run python main.py                        # drop into REPL
-    uv run python main.py "your question here"   # seed the first turn, then REPL
+    uv run python -m src.main                        # drop into REPL
+    uv run python -m src.main "your question here"   # seed the first turn, then REPL
 
 Supported question types:
     1. Topic search (papers):    "What are the hallmarks of cancer and how have they changed over time?"
@@ -28,7 +28,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
 
-from amass import AmassClient, AmassError
+from .amass import AmassClient, AmassError
 from baml_client import b
 from baml_client.types import (
     FinalAnswer,
@@ -124,7 +124,7 @@ def print_banner() -> None:
     console.print("[bold]Try one of these[/bold] [dim](type or paste directly):[/dim]")
     for i, q in enumerate(EXAMPLE_QUERIES, 1):
         console.print(f"  [dim]{i}.[/dim] {_highlight_amass_ids(escape(q))}")
-    console.print(f"\n[dim]Or seed the first turn from the shell:\n  uv run python main.py \"{escape(first)}\"[/dim]")
+    console.print(f"\n[dim]Or seed the first turn from the shell:\n  uv run python -m src.main \"{escape(first)}\"[/dim]")
     console.print("\n[dim]Type 'exit' or Ctrl-D to quit.[/dim]\n")
 
 

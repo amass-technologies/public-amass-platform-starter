@@ -23,10 +23,10 @@ cp .env.example .env
 uv run baml-cli generate
 
 # 4. Run the agent
-uv run python main.py
+uv run python -m src.main
 
 # Or seed the first turn directly:
-uv run python main.py "Find recruiting Phase 3 lung cancer drug trials"
+uv run python -m src.main "Find recruiting Phase 3 lung cancer drug trials"
 ```
 
 ## How the agent works
@@ -58,8 +58,10 @@ baml_src/
   clients.baml     # LLM client declarations (native Anthropic/OpenAI/Google + optional LiteLLM) and retry policies
   generators.baml  # Code-gen config (Python/Pydantic, async by default)
 baml_client/       # Generated — do not edit (gitignored)
-amass.py           # Async HTTP client for the amass platform API
-main.py            # REPL entry point and agent loop
+src/
+  __init__.py      # marks src/ as a package so `python -m src.main` works
+  amass.py         # Async HTTP client for the amass platform API
+  main.py          # REPL entry point and agent loop
 BAML.md            # Full BAML language reference
 AMASS.md           # amass platform API reference
 ```
