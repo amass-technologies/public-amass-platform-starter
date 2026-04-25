@@ -121,7 +121,7 @@ class AmassClient:
         if include_detailed_description:
             params.append(("include", "detailedDescription"))
         if include_references:
-            params.append(("include", "referenceAmassIds"))
+            params.append(("include", "referencesBiomedCore"))
         try:
             data = await self._request(
                 "GET", f"/cores/trialcore/records/{amass_id}", params=params

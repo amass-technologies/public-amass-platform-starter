@@ -111,7 +111,7 @@ TRIAL_GET_FIELDS_KEEP = (
     "designAllocation", "designInterventionModel", "designPrimaryPurpose", "designMasking",
     "resultsFirstPostDate", "whyStopped",
     "isFdaRegulatedDrug", "isFdaRegulatedDevice",
-    "armGroups", "referenceAmassIds", "oversightHasDmc",
+    "armGroups", "referencesBiomedCore", "oversightHasDmc",
 )
 MAX_CROSS_CORE_REFS = 5
 
@@ -206,7 +206,7 @@ async def _fetch_trial_with_refs(
     if raw is None:
         return None
     # Cross-core enrichment: parallel-fetch referenced BioMedCore papers (metadata only).
-    ref_ids = (raw.get("referenceAmassIds") or [])[:MAX_CROSS_CORE_REFS]
+    ref_ids = (raw.get("referencesBiomedCore") or [])[:MAX_CROSS_CORE_REFS]
     if ref_ids:
         refs = await asyncio.gather(
             *(amass.get_paper(rid, include_fulltext=False, include_authors=False) for rid in ref_ids),
@@ -385,7 +385,7 @@ def print_amass_results(
                 ft = " [green]★ fulltext[/green]" if r.get("hasFulltext") else ""
                 lines.append(f" [bold]{i:>2}.[/bold] {ret}{title}")
                 lines.append(f"     {authors} · {journal} · {year}")
-                lines.append(f"     {_amass_id(amass_id)} [dim]· cites={cites} · jQ={jq}[/dim]{ft}")
+                lines.append(f"     {_amass_id(amass_id)} [dim]· citations={cites} · jQ={jq}[/dim]{ft}")
 
     elif tool_name == "get_paper":
         if isinstance(tool_result, dict) and "error" in tool_result and len(tool_result) == 1:

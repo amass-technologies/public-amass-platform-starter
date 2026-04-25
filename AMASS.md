@@ -112,7 +112,12 @@ hasFulltext       boolean|null
 isRetracted       boolean|null
 ```
 
-**Optional fields (`include` param):** `fulltext`, `authorsMetadata`, `meshIds`, `substanceIds`, `referenceAmassIds`
+**Optional fields (`include` param):** `fulltext`, `authorsMetadata`, `meshIds`, `substanceIds`, `referencesTrialCore`, `references`, `citedBy`
+
+Reference fields:
+
+- `references`, `citedBy` — **intra-core links within BioMedCore.** Arrays of `AMBC_...` IDs pointing to other publications.
+- `referencesTrialCore` — **cross-core link to TrialCore.** Array of `AMTC_...` IDs pointing to associated clinical trials.
 
 ---
 
@@ -217,7 +222,7 @@ armGroups                 object[]     [{type, title, description}]
 oversightHasDmc           boolean|null
 ```
 
-**Optional fields (`include` param):** `detailedDescription`, `outcomes`, `referenceAmassIds`
+**Optional fields (`include` param):** `detailedDescription`, `outcomes`, `referencesBiomedCore`
 
 ---
 
@@ -291,16 +296,18 @@ curl "https://api.amass.tech/api/v1/cores/trialcore/records/{amassId}\
 **Cross-reference trials with publications:**
 
 ```bash
-# Step 1: get trial with reference IDs
-curl "https://api.amass.tech/api/v1/cores/trialcore/records/{amassId}" \
+# Step 1: get trial with referencesBiomedCore IDs
+curl "https://api.amass.tech/api/v1/cores/trialcore/records/{amassId}\
+?include=referencesBiomedCore" \
   -H "Authorization: Bearer amass_YOUR_KEY"
 
-# Step 2: fetch a referenced publication
-curl "https://api.amass.tech/api/v1/cores/biomedcore/records/{referenceAmassId}" \
+# Step 2: fetch a referenced publication (BioMedCore record)
+# Use one of the AMBC_ IDs from referencesBiomedCore in the response above.
+curl "https://api.amass.tech/api/v1/cores/biomedcore/records/{biomedCoreAmassId}" \
   -H "Authorization: Bearer amass_YOUR_KEY"
 ```
 
-For full walkthroughs of these patterns with real response data, see [Use Cases & Examples](map-clinical-landscape).
+For full walkthroughs of these patterns with real response data, see [Use Cases & Examples](use-cases).
 
 ---
 
