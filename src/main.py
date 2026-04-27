@@ -395,7 +395,7 @@ def print_amass_results(
             ret = "[bold red]RETRACTED [/bold red]" if r.get("isRetracted") else ""
             lines.append(f"{ret}[bold]{escape((r.get('title') or '(untitled)').strip())}[/bold]")
             lines.append(f"{escape(r.get('journal') or '?')} · {(r.get('publicationDate') or '?')[:10]} · {_amass_id(r.get('amassId') or '?')}")
-            lines.append(f"[dim]cites={r.get('citationCount')} · jQ={r.get('journalQualityJufo')}[/dim]")
+            lines.append(f"[dim]citations={r.get('citationCount')} · jQ={r.get('journalQualityJufo')}[/dim]")
             authors_meta = r.get("authorsMetadata") or []
             for a in authors_meta[:6]:
                 affs = a.get("affiliations") or []
