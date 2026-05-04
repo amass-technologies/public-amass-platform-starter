@@ -8,6 +8,8 @@ Python 3.13+ demo agent built around [BAML](https://docs.boundaryml.com) for typ
 
 The amass platform API reference is found in `AMASS.md`. The `biomedcore` and `trialcore` cores are the focus of this demo, but the agent can be easily extended to call other cores or API endpoints by adding new BAML functions.
 
+The `amass-api` skill (installed via `npx skills add amass-technologies/public-skills`) provides additional guidance for querying the amass platform API and is auto-triggered on biomedical literature / clinical trial questions.
+
 ## Commands
 
 ```bash

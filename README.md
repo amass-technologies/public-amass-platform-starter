@@ -3,6 +3,12 @@
 An interactive agent for querying scientific literature and clinical trials via the [amass platform](https://platform.amass.tech/).
 Get your `AMASS_API_KEY` at https://platform.amass.tech/ and starter credits will be added to your account.
 
+> **Coding agent skills:** companion skills for Codex, GitHub Copilot, Claude Code and other agents are published at [amass-technologies/public-skills](https://github.com/amass-technologies/public-skills). Install the `amass-api` skill with or check the repository for examples of how to call the amass API from your own agents:
+> ```bash
+> npx skills add amass-technologies/public-skills
+> ```
+
+
 https://github.com/user-attachments/assets/e92ab012-10a0-4c76-95be-c3b8e348f033
 
 ## Quickstart
