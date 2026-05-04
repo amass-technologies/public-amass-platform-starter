@@ -14,6 +14,7 @@ class GetPaper {
   thought string @description("One sentence on why this tool was chosen.")
   amass_id string @description("Canonical AMBC_ id from a prior search result.")
   include_fulltext bool? @description("Default true. Set false only if the user explicitly asks for metadata or authors without the body text.")
+  include_references_trialcore bool? @description("Default false. Set true when the user asks about clinical trials related to or evidence-based on this paper. Fetches AMTC_ ids of TrialCore records cross-referenced from this paper.")
 }
 
 class LookupPaper {
@@ -86,7 +87,10 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
         written" — put the author name (and any topic hint) into the query string.
       - get_paper: fetch a specific BioMedCore record by amassId (AMBC_...). Use whenever the
         user wants full text, author affiliations, or details about a paper already in the recent
-        results or scratchpad.
+        results or scratchpad. Set include_references_trialcore=true when the user asks which
+        clinical trials are tied to or based on this paper — this fetches AMTC ids of TrialCore
+        records cross-referenced from the paper (the reverse direction of lookup_trial's
+        include_references).
       - lookup_paper: resolve a public identifier (PMID or DOI) to a BioMedCore record AND fetch
         it in one call. Use whenever the user gives a PMID (digits, often introduced as "PMID
         12345678" or "PubMed 12345678") or a DOI (looks like "10.xxxx/..."). Set exactly one of
@@ -137,6 +141,8 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → search_trials query: "", phase: "PHASE3", sponsor_type: "INDUSTRY", facility_countries: "DE", max_completion_date: "2026-01-01"
           * user: "Large diabetes trials with at least 1000 participants"
             → search_trials query: "diabetes", min_enrollment: 1000
+          * user: "What trials reference this paper?" (after a search_papers result, drilling into #1)
+            → get_paper amass_id: "AMBC_...", include_references_trialcore: true
           * user: "Look up PMID 38123456"
             → lookup_paper pmid: "38123456"
           * user: "Show me trial NCT06012345"
@@ -199,6 +205,9 @@ function SummarizeResult(user_query: string, history: string, observations_json:
           Methods: 1 bullet if discernible.
           Note if the fulltext was truncated.
           Prefix with [RETRACTED] if applicable.
+          Trials referenced: if the result contains a "_references" array of TrialCore trials,
+          render a small sub-list at the end as "Trials referenced (from TrialCore):" with one
+          line per trial: <briefTitle> — <sponsorName> (<phase>, <overallStatus>) — AMTC_...
       - search_trials: produce a numbered list (1., 2., ...) with, per trial:
           [<acronym>] <briefTitle> — <sponsorName> (<phase>, <overallStatus>)
           amassId: AMTC_...   nctId: NCT...   enrollment: N   country(s): XX, YY
@@ -268,6 +277,16 @@ test TestRouteGetPaper {
     user_query "Show me the full text and author affiliations for #1"
     history "user: What are the hallmarks of cancer and how have they changed over time?\nassistant: (lists 3 review papers on the hallmarks framework)"
     last_results "1. Hallmarks of Cancer: The Next Generation — Hanahan D et al. (2011, Cell) — AMBC_example001\n2. Hallmarks of Cancer: New Dimensions — Hanahan D et al. (2022, Cancer Discovery) — AMBC_example002\n3. The Hallmarks of Cancer — Hanahan D, Weinberg RA (2000, Cell) — AMBC_example003"
+    scratch ""
+  }
+}
+
+test TestRouteGetPaperWithTrialRefs {
+  functions [RouteQuery]
+  args {
+    user_query "What clinical trials reference #1?"
+    history "user: Find papers on osimertinib in EGFR-mutant NSCLC\nassistant: (lists 3 papers)"
+    last_results "1. Osimertinib in untreated EGFR-mutated advanced NSCLC — Soria JC et al. (2018) — AMBC_example001\n2. Adjuvant osimertinib in resected EGFR-mutated NSCLC — Wu YL et al. (2020) — AMBC_example002\n3. Osimertinib for unresectable stage III NSCLC — Reck M et al. (2023) — AMBC_example003"
     scratch ""
   }
 }

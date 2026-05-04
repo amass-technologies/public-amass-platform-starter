@@ -65,13 +65,28 @@ class AmassClient:
         amass_id: str,
         *,
         include_fulltext: bool = True,
-        include_authors: bool = True,
+        include_authors_metadata: bool = True,
+        include_mesh_ids: bool = False,
+        include_substance_ids: bool = False,
+        include_references_trialcore: bool = False,
+        include_references: bool = False,
+        include_cited_by: bool = False,
     ) -> dict[str, Any] | None:
         params: list[tuple[str, str]] = []
-        if include_authors:
-            params.append(("include", "authorsMetadata"))
         if include_fulltext:
             params.append(("include", "fulltext"))
+        if include_authors_metadata:
+            params.append(("include", "authorsMetadata"))
+        if include_mesh_ids:
+            params.append(("include", "meshIds"))
+        if include_substance_ids:
+            params.append(("include", "substanceIds"))
+        if include_references_trialcore:
+            params.append(("include", "referencesTrialCore"))
+        if include_references:
+            params.append(("include", "references"))
+        if include_cited_by:
+            params.append(("include", "citedBy"))
         try:
             data = await self._request(
                 "GET", f"/cores/biomedcore/records/{amass_id}", params=params

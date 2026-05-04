@@ -209,11 +209,38 @@ async def _fetch_trial_with_refs(
     ref_ids = (raw.get("referencesBiomedCore") or [])[:MAX_CROSS_CORE_REFS]
     if ref_ids:
         refs = await asyncio.gather(
-            *(amass.get_paper(rid, include_fulltext=False, include_authors=False) for rid in ref_ids),
+            *(amass.get_paper(rid, include_fulltext=False, include_authors_metadata=False) for rid in ref_ids),
             return_exceptions=True,
         )
         raw["_references"] = [
             trim_paper_search_record(r) for r in refs if isinstance(r, dict)
+        ]
+    return raw
+
+
+async def _fetch_paper_with_refs(
+    amass: AmassClient,
+    amass_id: str,
+    *,
+    include_fulltext: bool,
+    include_references_trialcore: bool = False,
+) -> dict[str, Any] | None:
+    raw = await amass.get_paper(
+        amass_id,
+        include_fulltext=include_fulltext,
+        include_references_trialcore=include_references_trialcore,
+    )
+    if raw is None:
+        return None
+    # Cross-core enrichment: parallel-fetch referenced TrialCore trials (no outcomes — metadata only).
+    ref_ids = (raw.get("referencesTrialCore") or [])[:MAX_CROSS_CORE_REFS]
+    if ref_ids:
+        refs = await asyncio.gather(
+            *(amass.get_trial(rid, include_outcomes=False) for rid in ref_ids),
+            return_exceptions=True,
+        )
+        raw["_references"] = [
+            trim_trial_search_record(r) for r in refs if isinstance(r, dict)
         ]
     return raw
 
@@ -250,7 +277,13 @@ async def dispatch(
         return "search_papers", [trim_paper_search_record(r) for r in raw]
     if isinstance(req, GetPaper):
         include_fulltext = True if req.include_fulltext is None else req.include_fulltext
-        raw = await amass.get_paper(req.amass_id, include_fulltext=include_fulltext)
+        include_refs_tc = bool(req.include_references_trialcore)
+        raw = await _fetch_paper_with_refs(
+            amass,
+            req.amass_id,
+            include_fulltext=include_fulltext,
+            include_references_trialcore=include_refs_tc,
+        )
         if raw is None:
             return "get_paper", {"error": f"no record found for {req.amass_id}"}
         return "get_paper", trim_paper_record(raw)
@@ -330,7 +363,10 @@ def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | Lookup
         return "search_papers(" + ", ".join(bits) + ")"
     if isinstance(req, GetPaper):
         inc_ft = True if req.include_fulltext is None else req.include_fulltext
-        return f"get_paper(amass_id={req.amass_id!r}, include_fulltext={inc_ft})"
+        bits = [f"amass_id={req.amass_id!r}", f"include_fulltext={inc_ft}"]
+        if req.include_references_trialcore:
+            bits.append("include_references_trialcore=True")
+        return "get_paper(" + ", ".join(bits) + ")"
     if isinstance(req, SearchTrials):
         bits = [f"query={req.query!r}", f"limit={req.limit or 10}"]
         for name in (
@@ -429,6 +465,16 @@ def print_amass_results(
             ft = r.get("fulltext") or ""
             if ft:
                 lines.append(f"[green]fulltext: {len(ft):,} chars[/green]")
+            refs = r.get("_references") or []
+            if refs:
+                lines.append(f"[green]cross-core: {len(refs)} TrialCore reference(s)[/green]")
+                for ref in refs[:3]:
+                    rt = escape((ref.get("briefTitle") or "(untitled)").strip())
+                    rs = escape((ref.get("sponsorName") or "?").strip() or "?")
+                    rp = escape(ref.get("phase") or "?")
+                    lines.append(f"  · {rt} — {rs} ({rp}) {_amass_id(ref.get('amassId') or '?')}")
+                if len(refs) > 3:
+                    lines.append(f"  [dim](+{len(refs) - 3} more)[/dim]")
 
     elif tool_name == "search_trials":
         border = "cyan"
@@ -522,7 +568,7 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
         ]
     if tool_name in ("get_paper",) and isinstance(tool_result, dict):
         keep = ("amassId", "title", "authors", "publicationDate", "journal",
-                "citationCount", "journalQualityJufo", "isRetracted")
+                "citationCount", "journalQualityJufo", "isRetracted", "_references")
         trimmed = {k: tool_result.get(k) for k in keep if k in tool_result}
         ft = tool_result.get("fulltext")
         if isinstance(ft, str):
