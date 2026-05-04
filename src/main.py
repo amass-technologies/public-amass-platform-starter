@@ -261,8 +261,14 @@ async def dispatch(
             phase=req.phase,
             overall_status=req.overall_status,
             study_type=req.study_type,
+            sponsor_type=req.sponsor_type,
             intervention_type=req.intervention_type,
+            facility_countries=req.facility_countries,
             min_start_date=req.min_start_date,
+            max_start_date=req.max_start_date,
+            min_completion_date=req.min_completion_date,
+            max_completion_date=req.max_completion_date,
+            min_enrollment=req.min_enrollment,
             has_results=req.has_results,
         )
         return "search_trials", [trim_trial_search_record(r) for r in raw]
@@ -327,10 +333,17 @@ def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | Lookup
         return f"get_paper(amass_id={req.amass_id!r}, include_fulltext={inc_ft})"
     if isinstance(req, SearchTrials):
         bits = [f"query={req.query!r}", f"limit={req.limit or 10}"]
-        for name in ("phase", "overall_status", "study_type", "intervention_type", "min_start_date"):
+        for name in (
+            "phase", "overall_status", "study_type", "sponsor_type",
+            "intervention_type", "facility_countries",
+            "min_start_date", "max_start_date",
+            "min_completion_date", "max_completion_date",
+        ):
             v = getattr(req, name)
             if v:
                 bits.append(f"{name}={v}")
+        if req.min_enrollment is not None:
+            bits.append(f"min_enrollment={req.min_enrollment}")
         if req.has_results is not None:
             bits.append(f"has_results={req.has_results}")
         return "search_trials(" + ", ".join(bits) + ")"

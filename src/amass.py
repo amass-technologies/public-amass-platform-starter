@@ -90,10 +90,23 @@ class AmassClient:
         phase: str | None = None,
         overall_status: str | None = None,
         study_type: str | None = None,
+        sponsor_type: str | None = None,
         intervention_type: str | None = None,
+        facility_countries: Iterable[str] | str | None = None,
         min_start_date: str | None = None,
+        max_start_date: str | None = None,
+        min_completion_date: str | None = None,
+        max_completion_date: str | None = None,
+        min_enrollment: int | None = None,
         has_results: bool | None = None,
+        include: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """Search TrialCore.
+
+        `facility_countries` accepts either a comma-joined string (e.g. ``"DE,US"``) or any
+        iterable of ISO codes (e.g. ``["DE", "US"]``); both serialize to a single
+        ``facilityCountries=DE,US`` query param per the API spec.
+        """
         params: list[tuple[str, str]] = [
             ("query", query),
             ("limit", str(max(1, min(limit, 300)))),
@@ -104,12 +117,32 @@ class AmassClient:
             params.append(("overallStatus", overall_status))
         if study_type:
             params.append(("studyType", study_type))
+        if sponsor_type:
+            params.append(("sponsorType", sponsor_type))
         if intervention_type:
             params.append(("interventionType", intervention_type))
+        if facility_countries:
+            countries = (
+                facility_countries
+                if isinstance(facility_countries, str)
+                else ",".join(facility_countries)
+            )
+            if countries:
+                params.append(("facilityCountries", countries))
         if min_start_date:
             params.append(("minStartDate", min_start_date))
+        if max_start_date:
+            params.append(("maxStartDate", max_start_date))
+        if min_completion_date:
+            params.append(("minCompletionDate", min_completion_date))
+        if max_completion_date:
+            params.append(("maxCompletionDate", max_completion_date))
+        if min_enrollment is not None:
+            params.append(("minEnrollment", str(min_enrollment)))
         if has_results is not None:
             params.append(("hasResults", "true" if has_results else "false"))
+        for inc in include or ():
+            params.append(("include", inc))
         data = await self._request("GET", "/cores/trialcore/records", params=params)
         return data if isinstance(data, list) else []
 

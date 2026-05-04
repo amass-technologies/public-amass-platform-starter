@@ -32,8 +32,14 @@ class SearchTrials {
   phase string? @description("One of EARLY_PHASE1, PHASE1, PHASE1/PHASE2, PHASE2, PHASE2/PHASE3, PHASE3, PHASE4, NA. Set only when the user names a phase.")
   overall_status string? @description("One of RECRUITING, NOT_YET_RECRUITING, ENROLLING_BY_INVITATION, ACTIVE_NOT_RECRUITING, SUSPENDED, TERMINATED, COMPLETED, WITHDRAWN, UNKNOWN, WITHHELD, AVAILABLE, NO_LONGER_AVAILABLE, TEMPORARILY_NOT_AVAILABLE, APPROVED_FOR_MARKETING. Set only when the user filters by status (e.g. 'recruiting', 'completed').")
   study_type string? @description("One of INTERVENTIONAL, OBSERVATIONAL, EXPANDED_ACCESS.")
+  sponsor_type string? @description("One of NIH, FED, INDUSTRY, OTHER, OTHER_GOV, INDIV, NETWORK. Set only when the user names a sponsor class (e.g. 'industry-sponsored', 'NIH-funded', 'federal').")
   intervention_type string? @description("One of DRUG, DEVICE, BIOLOGICAL, PROCEDURE, RADIATION, BEHAVIORAL, GENETIC, DIETARY_SUPPLEMENT, DIAGNOSTIC_TEST, COMBINATION_PRODUCT, OTHER.")
+  facility_countries string? @description("Comma-separated ISO country codes, e.g. 'DE,US'. Set only when the user names one or more countries.")
   min_start_date string? @description("ISO date lower bound for trial start, e.g. 2020-01-01. Set only when the user gives a year or says 'recent'.")
+  max_start_date string? @description("ISO date upper bound for trial start, e.g. 2024-12-31. Set when the user constrains how recently a trial began.")
+  min_completion_date string? @description("ISO date lower bound for trial completion, e.g. 2026-01-01. Set for 'completing after' queries.")
+  max_completion_date string? @description("ISO date upper bound for trial completion, e.g. 2026-01-01. Set for 'completing before' queries.")
+  min_enrollment int? @description("Minimum participant count. Set when the user asks for 'large trials' or 'trials with at least N participants'.")
   has_results bool? @description("True only when the user explicitly asks for trials with posted results.")
 }
 
@@ -127,6 +133,10 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → search_papers query: "CRISPR", min_publication_date: "2024-01-01", min_citation_count: 100
           * user: "Find recruiting Phase 3 lung cancer drug trials in the US"
             → search_trials query: "lung cancer", phase: "PHASE3", overall_status: "RECRUITING", intervention_type: "DRUG"
+          * user: "Industry-sponsored Phase 3 trials in Germany completing before 2026"
+            → search_trials query: "", phase: "PHASE3", sponsor_type: "INDUSTRY", facility_countries: "DE", max_completion_date: "2026-01-01"
+          * user: "Large diabetes trials with at least 1000 participants"
+            → search_trials query: "diabetes", min_enrollment: 1000
           * user: "Look up PMID 38123456"
             → lookup_paper pmid: "38123456"
           * user: "Show me trial NCT06012345"
@@ -135,8 +145,9 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → lookup_paper doi: "10.1038/s41586-024-00001-x"
       - Leave min_journal_quality, min_publication_date, max_publication_date, and
         min_citation_count (search_papers) and phase / overall_status / study_type /
-        intervention_type / min_start_date / has_results (search_trials) null unless the user's
-        phrasing explicitly calls for them.
+        sponsor_type / intervention_type / facility_countries / min_start_date /
+        max_start_date / min_completion_date / max_completion_date / min_enrollment /
+        has_results (search_trials) null unless the user's phrasing explicitly calls for them.
         Do NOT apply filters just because the topic sounds foundational or important.
       - Never invent an amassId; only use IDs that appear in the Recent results block or the
         scratchpad.
@@ -265,6 +276,46 @@ test TestRouteSearchTrials {
   functions [RouteQuery]
   args {
     user_query "Find recruiting Phase 3 lung cancer drug trials in the US"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchTrialsSponsorCountryCompletion {
+  functions [RouteQuery]
+  args {
+    user_query "Industry-sponsored Phase 3 trials in Germany completing before 2026"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchTrialsLargeEnrollment {
+  functions [RouteQuery]
+  args {
+    user_query "Large diabetes trials with at least 1000 participants"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchTrialsMaxStartDate {
+  functions [RouteQuery]
+  args {
+    user_query "Alzheimer's trials that started no later than 2022"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchTrialsCompletingAfter {
+  functions [RouteQuery]
+  args {
+    user_query "Multiple sclerosis trials completing after 2027"
     history ""
     last_results ""
     scratch ""
