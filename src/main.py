@@ -307,7 +307,13 @@ async def dispatch(
         return "search_trials", [trim_trial_search_record(r) for r in raw]
     if isinstance(req, GetTrial):
         include_outcomes = True if req.include_outcomes is None else req.include_outcomes
-        raw = await _fetch_trial_with_refs(amass, req.amass_id, include_outcomes=include_outcomes)
+        include_references = bool(req.include_references)
+        raw = await _fetch_trial_with_refs(
+            amass,
+            req.amass_id,
+            include_outcomes=include_outcomes,
+            include_references=include_references,
+        )
         if raw is None:
             return "get_trial", {"error": f"no trial found for {req.amass_id}"}
         return "get_trial", trim_trial_record(raw)
@@ -385,7 +391,10 @@ def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | Lookup
         return "search_trials(" + ", ".join(bits) + ")"
     if isinstance(req, GetTrial):
         inc_out = True if req.include_outcomes is None else req.include_outcomes
-        return f"get_trial(amass_id={req.amass_id!r}, include_outcomes={inc_out})"
+        bits = [f"amass_id={req.amass_id!r}", f"include_outcomes={inc_out}"]
+        if req.include_references:
+            bits.append("include_references=True")
+        return "get_trial(" + ", ".join(bits) + ")"
     if isinstance(req, LookupPaper):
         inc_ft = True if req.include_fulltext is None else req.include_fulltext
         ident = f"pmid={req.pmid!r}" if req.pmid else f"doi={req.doi!r}"

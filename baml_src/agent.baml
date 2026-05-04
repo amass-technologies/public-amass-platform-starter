@@ -49,6 +49,7 @@ class GetTrial {
   thought string @description("One sentence on why this tool was chosen.")
   amass_id string @description("Canonical AMTC_ id from a prior trial search result.")
   include_outcomes bool? @description("Default true. Set false only if the user explicitly wants just the protocol summary without outcome measures.")
+  include_references bool? @description("Default false. Set true when the user asks about referenced publications, related papers, or evidence behind a trial. Fetches amass IDs of BioMedCore papers cited by the trial.")
 }
 
 class LookupTrial {
@@ -104,7 +105,8 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - lookup_trial: resolve an NCT id to a TrialCore record AND fetch it in one call. Use
         whenever the user gives an NCT id (starts with "NCT" followed by digits, e.g.
         NCT06012345). Prefer this over search_trials for direct NCT lookups — it's faster and
-        guaranteed to hit the right trial. Set include_references=true when the user asks about
+        guaranteed to hit the right trial.
+      - For both get_trial and lookup_trial: set include_references=true when the user asks about
         referenced publications, related papers, or evidence behind the trial — this fetches
         amass IDs of BioMedCore papers cited by the trial for cross-core enrichment.
       - final_answer: use when (a) no tool is needed (greetings, meta questions, ambiguous
@@ -345,6 +347,16 @@ test TestRouteGetTrial {
   functions [RouteQuery]
   args {
     user_query "Tell me more about #2"
+    history "user: Find recruiting Phase 3 lung cancer drug trials\nassistant: (lists 3 trials)"
+    last_results "1. A Study of Pembrolizumab in NSCLC — Merck (PHASE3, RECRUITING) — AMTC_example001\n2. Osimertinib in EGFR-mutant NSCLC — AstraZeneca (PHASE3, RECRUITING) — AMTC_example002\n3. Adagrasib for KRAS G12C NSCLC — Mirati (PHASE3, RECRUITING) — AMTC_example003"
+    scratch ""
+  }
+}
+
+test TestRouteGetTrialWithReferences {
+  functions [RouteQuery]
+  args {
+    user_query "What papers does #2 cite?"
     history "user: Find recruiting Phase 3 lung cancer drug trials\nassistant: (lists 3 trials)"
     last_results "1. A Study of Pembrolizumab in NSCLC — Merck (PHASE3, RECRUITING) — AMTC_example001\n2. Osimertinib in EGFR-mutant NSCLC — AstraZeneca (PHASE3, RECRUITING) — AMTC_example002\n3. Adagrasib for KRAS G12C NSCLC — Mirati (PHASE3, RECRUITING) — AMTC_example003"
     scratch ""
