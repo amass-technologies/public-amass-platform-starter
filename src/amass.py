@@ -33,7 +33,7 @@ class AmassClient:
         self,
         query: str,
         *,
-        limit: int = 10,
+        limit: int = 20,
         min_publication_date: str | None = None,
         min_journal_quality: int | None = None,
         include: Iterable[str] | None = None,
@@ -41,7 +41,7 @@ class AmassClient:
     ) -> list[dict[str, Any]]:
         params: list[tuple[str, str]] = [
             ("query", query),
-            ("limit", str(max(1, min(limit, 1000)))),
+            ("limit", str(max(1, min(limit, 300)))),
         ]
         if min_publication_date:
             params.append(("minPublicationDate", min_publication_date))
@@ -80,7 +80,7 @@ class AmassClient:
         self,
         query: str,
         *,
-        limit: int = 10,
+        limit: int = 20,
         phase: str | None = None,
         overall_status: str | None = None,
         study_type: str | None = None,
@@ -90,7 +90,7 @@ class AmassClient:
     ) -> list[dict[str, Any]]:
         params: list[tuple[str, str]] = [
             ("query", query),
-            ("limit", str(max(1, min(limit, 1000)))),
+            ("limit", str(max(1, min(limit, 300)))),
         ]
         if phase:
             params.append(("phase", phase))

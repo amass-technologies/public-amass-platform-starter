@@ -2,7 +2,7 @@ class SearchPapers {
   tool "search_papers" @description("Must be the literal string 'search_papers'.")
   thought string @description("One sentence on why this tool was chosen.")
   query string @description("Free-text query across titles, abstracts, fulltext, and metadata. Author names are indexed, so use this for author follow-ups too.")
-  limit int? @description("1 to 50, default 10.")
+  limit int? @description("1 to 300, default 20.")
   min_publication_date string? @description("ISO date lower bound, e.g. 2023-01-01.")
   min_journal_quality int? @description("0 to 3. Use 2 when the user asks for high quality or top-tier.")
 }
@@ -26,7 +26,7 @@ class SearchTrials {
   tool "search_trials" @description("Must be the literal string 'search_trials'.")
   thought string @description("One sentence on why this tool was chosen.")
   query string @description("Free-text search across trial titles, summaries, conditions, interventions, sponsors. NCT ids can also be passed here.")
-  limit int? @description("1 to 50, default 10.")
+  limit int? @description("1 to 300, default 20.")
   phase string? @description("One of EARLY_PHASE1, PHASE1, PHASE1/PHASE2, PHASE2, PHASE2/PHASE3, PHASE3, PHASE4, NA. Set only when the user names a phase.")
   overall_status string? @description("One of RECRUITING, NOT_YET_RECRUITING, ENROLLING_BY_INVITATION, ACTIVE_NOT_RECRUITING, SUSPENDED, TERMINATED, COMPLETED, WITHDRAWN, UNKNOWN, WITHHELD, AVAILABLE, NO_LONGER_AVAILABLE, TEMPORARILY_NOT_AVAILABLE, APPROVED_FOR_MARKETING. Set only when the user filters by status (e.g. 'recruiting', 'completed').")
   study_type string? @description("One of INTERVENTIONAL, OBSERVATIONAL, EXPANDED_ACCESS.")
