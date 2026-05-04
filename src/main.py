@@ -241,9 +241,11 @@ async def dispatch(
     if isinstance(req, SearchPapers):
         raw = await amass.search_papers(
             query=req.query,
-            limit=req.limit or 10,
+            limit=req.limit or 20,
             min_publication_date=req.min_publication_date,
+            max_publication_date=req.max_publication_date,
             min_journal_quality=req.min_journal_quality,
+            min_citation_count=req.min_citation_count,
         )
         return "search_papers", [trim_paper_search_record(r) for r in raw]
     if isinstance(req, GetPaper):
@@ -310,11 +312,15 @@ async def dispatch(
 
 def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial) -> str:
     if isinstance(req, SearchPapers):
-        bits = [f"query={req.query!r}", f"limit={req.limit or 10}"]
+        bits = [f"query={req.query!r}", f"limit={req.limit or 20}"]
         if req.min_publication_date:
             bits.append(f"min_publication_date={req.min_publication_date}")
+        if req.max_publication_date:
+            bits.append(f"max_publication_date={req.max_publication_date}")
         if req.min_journal_quality is not None:
             bits.append(f"min_journal_quality={req.min_journal_quality}")
+        if req.min_citation_count is not None:
+            bits.append(f"min_citation_count={req.min_citation_count}")
         return "search_papers(" + ", ".join(bits) + ")"
     if isinstance(req, GetPaper):
         inc_ft = True if req.include_fulltext is None else req.include_fulltext

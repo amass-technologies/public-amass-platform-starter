@@ -35,7 +35,9 @@ class AmassClient:
         *,
         limit: int = 20,
         min_publication_date: str | None = None,
+        max_publication_date: str | None = None,
         min_journal_quality: int | None = None,
+        min_citation_count: int | None = None,
         include: Iterable[str] | None = None,
         is_retracted: bool | None = False,
     ) -> list[dict[str, Any]]:
@@ -45,8 +47,12 @@ class AmassClient:
         ]
         if min_publication_date:
             params.append(("minPublicationDate", min_publication_date))
+        if max_publication_date:
+            params.append(("maxPublicationDate", max_publication_date))
         if min_journal_quality is not None:
             params.append(("minJournalQualityJufo", str(min_journal_quality)))
+        if min_citation_count is not None:
+            params.append(("minCitationCount", str(min_citation_count)))
         if is_retracted is not None:
             params.append(("isRetracted", "true" if is_retracted else "false"))
         for inc in include or ():

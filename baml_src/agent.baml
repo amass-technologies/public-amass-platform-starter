@@ -4,7 +4,9 @@ class SearchPapers {
   query string @description("Free-text query across titles, abstracts, fulltext, and metadata. Author names are indexed, so use this for author follow-ups too.")
   limit int? @description("1 to 300, default 20.")
   min_publication_date string? @description("ISO date lower bound, e.g. 2023-01-01.")
+  max_publication_date string? @description("ISO date upper bound, e.g. 2024-12-31.")
   min_journal_quality int? @description("0 to 3. Use 2 when the user asks for high quality or top-tier.")
+  min_citation_count int? @description("0 to 100000. Set when the user asks for highly cited or impactful papers.")
 }
 
 class GetPaper {
@@ -121,6 +123,8 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → search_papers query: "hallmarks of cancer"
           * user: "What else has D Hanahan published on cancer biology since 2015?"
             → search_papers query: "Hanahan cancer biology"
+          * user: "Find highly-cited CRISPR papers from 2024"
+            → search_papers query: "CRISPR", min_publication_date: "2024-01-01", min_citation_count: 100
           * user: "Find recruiting Phase 3 lung cancer drug trials in the US"
             → search_trials query: "lung cancer", phase: "PHASE3", overall_status: "RECRUITING", intervention_type: "DRUG"
           * user: "Look up PMID 38123456"
@@ -129,9 +133,10 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → lookup_trial nct_id: "NCT06012345"
           * user: "Fetch DOI 10.1038/s41586-024-00001-x"
             → lookup_paper doi: "10.1038/s41586-024-00001-x"
-      - Leave min_journal_quality and min_publication_date (search_papers) and phase /
-        overall_status / study_type / intervention_type / min_start_date / has_results
-        (search_trials) null unless the user's phrasing explicitly calls for them.
+      - Leave min_journal_quality, min_publication_date, max_publication_date, and
+        min_citation_count (search_papers) and phase / overall_status / study_type /
+        intervention_type / min_start_date / has_results (search_trials) null unless the user's
+        phrasing explicitly calls for them.
         Do NOT apply filters just because the topic sounds foundational or important.
       - Never invent an amassId; only use IDs that appear in the Recent results block or the
         scratchpad.
@@ -230,6 +235,16 @@ test TestRouteTopicSearch {
   functions [RouteQuery]
   args {
     user_query "Find recent high-quality papers on CRISPR gene editing from 2024"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteHighlyCitedDateRange {
+  functions [RouteQuery]
+  args {
+    user_query "Find highly-cited CRISPR papers from 2024"
     history ""
     last_results ""
     scratch ""
