@@ -31,13 +31,13 @@ Cores are domain-specific datasets. Each Core lives under `/v1/cores/{coreName}/
 
 | Core | Path | Status |
 | --- | --- | --- |
-| **BioMedCore** | `/v1/cores/biomedcore/` | Available |
+| **BiomedCore** | `/v1/cores/biomedcore/` | Available |
 | **TrialCore** | `/v1/cores/trialcore/` | Available |
 | **RegulatoryCore** | `/v1/cores/regulatorycore/` | Coming soon |
 
 ---
 
-## BioMedCore Endpoints
+## BiomedCore Endpoints
 
 ### 1. Search
 
@@ -85,7 +85,7 @@ Returns `[{"amassIds": ["AMBC_..."]}, {"error": "..."}]` — one entry per input
 
 ---
 
-## BioMedCore Record Schema
+## BiomedCore Record Schema
 
 **Default fields:**
 
@@ -116,8 +116,35 @@ isRetracted       boolean|null
 
 Reference fields:
 
-- `references`, `citedBy` — **intra-core links within BioMedCore.** Arrays of `AMBC_...` IDs pointing to other publications.
+- `references`, `citedBy` — **intra-core links within BiomedCore.** Arrays of `AMBC_...` IDs pointing to other publications.
 - `referencesTrialCore` — **cross-core link to TrialCore.** Array of `AMTC_...` IDs pointing to associated clinical trials.
+
+```
+intra-core (within BiomedCore):
+
+   AMBC_aaa ─cites─┐                  ┌─► AMBC_p001
+                   │                  ├─► AMBC_p002
+                   │   ┌──────────┐   │
+                   ├──►│  AMBC_X  │───┤      ⋮
+                   │   └──────────┘   │
+                   │                  ├─► AMBC_p051
+   AMBC_bbb ─cites─┘                  └─► AMBC_p052
+
+   AMBC_X.citedBy    = [AMBC_aaa, AMBC_bbb]            ← 2 IDs
+   AMBC_X.references = [AMBC_p001, …, AMBC_p052]      ← 52 IDs
+
+cross-core (BiomedCore → TrialCore):
+
+                          ┌─► AMTC_t01
+                          ├─► AMTC_t02
+   ┌──────────┐           │
+   │  AMBC_X  │ ─────────►┤      ⋮
+   └──────────┘           │
+                          ├─► AMTC_t04
+                          └─► AMTC_t05
+
+   AMBC_X.referencesTrialCore = [AMTC_t01, …, AMTC_t05]    ← 5 IDs
+```
 
 ---
 
@@ -301,13 +328,13 @@ curl "https://api.amass.tech/api/v1/cores/trialcore/records/{amassId}\
 ?include=referencesBiomedCore" \
   -H "Authorization: Bearer amass_YOUR_KEY"
 
-# Step 2: fetch a referenced publication (BioMedCore record)
+# Step 2: fetch a referenced publication (BiomedCore record)
 # Use one of the AMBC_ IDs from referencesBiomedCore in the response above.
 curl "https://api.amass.tech/api/v1/cores/biomedcore/records/{biomedCoreAmassId}" \
   -H "Authorization: Bearer amass_YOUR_KEY"
 ```
 
-For full walkthroughs of these patterns with real response data, see [Use Cases & Examples](use-cases).
+For full walkthroughs of these patterns with real response data, see [API Workflows](use-cases).
 
 ---
 
