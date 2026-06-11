@@ -1,4 +1,4 @@
-"""Async client for the amass platform API (BioMedCore + TrialCore)."""
+"""Async client for the amass platform API (BioMedCore + TrialCore + DrugCore + RegulatoryCore)."""
 
 from __future__ import annotations
 
@@ -185,6 +185,169 @@ class AmassClient:
                 return None
             raise
         return data if isinstance(data, dict) else None
+
+    async def search_drugs(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        drug_type: str | None = None,
+        max_clinical_stage: str | None = None,
+        include: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search DrugCore (drugs + molecules, sourced from ChEMBL)."""
+        params: list[tuple[str, str]] = [
+            ("query", query),
+            ("limit", str(max(1, min(limit, 300)))),
+        ]
+        if drug_type:
+            params.append(("drugType", drug_type))
+        if max_clinical_stage:
+            params.append(("maxClinicalStage", max_clinical_stage))
+        for inc in include or ():
+            params.append(("include", inc))
+        data = await self._request("GET", "/cores/drugcore/records", params=params)
+        return data if isinstance(data, list) else []
+
+    async def get_drug(
+        self,
+        amass_id: str,
+        *,
+        include_parent: bool = False,
+        include_children: bool = False,
+        include_references_trialcore: bool = False,
+        include_references_biomedcore: bool = False,
+        include_references_regulatorycore: bool = False,
+    ) -> dict[str, Any] | None:
+        params: list[tuple[str, str]] = []
+        if include_parent:
+            params.append(("include", "parent"))
+        if include_children:
+            params.append(("include", "children"))
+        if include_references_trialcore:
+            params.append(("include", "referencesTrialCore"))
+        if include_references_biomedcore:
+            params.append(("include", "referencesBiomedCore"))
+        if include_references_regulatorycore:
+            params.append(("include", "referencesRegulatoryCore"))
+        try:
+            data = await self._request(
+                "GET", f"/cores/drugcore/records/{amass_id}", params=params
+            )
+        except AmassError as e:
+            if "404" in str(e):
+                return None
+            raise
+        return data if isinstance(data, dict) else None
+
+    async def search_regulatory(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        agency: str | None = None,
+        molecule_type: str | None = None,
+        authorization_status: str | None = None,
+        has_designation: str | None = None,
+        is_orphan: bool | None = None,
+        min_authorization_date: str | None = None,
+        max_authorization_date: str | None = None,
+        include: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search RegulatoryCore (cross-agency FDA + EMA drug authorizations).
+
+        The enum filters (`agency`, `molecule_type`, `authorization_status`,
+        `has_designation`) accept a single value here; the API supports repeating each
+        param for OR semantics, but the starter keeps one value per filter for simplicity.
+        """
+        params: list[tuple[str, str]] = [
+            ("query", query),
+            ("limit", str(max(1, min(limit, 300)))),
+        ]
+        if agency:
+            params.append(("agency", agency))
+        if molecule_type:
+            params.append(("moleculeType", molecule_type))
+        if authorization_status:
+            params.append(("authorizationStatus", authorization_status))
+        if has_designation:
+            params.append(("hasDesignation", has_designation))
+        if is_orphan is not None:
+            params.append(("isOrphan", "true" if is_orphan else "false"))
+        if min_authorization_date:
+            params.append(("minAuthorizationDate", min_authorization_date))
+        if max_authorization_date:
+            params.append(("maxAuthorizationDate", max_authorization_date))
+        for inc in include or ():
+            params.append(("include", inc))
+        data = await self._request("GET", "/cores/regulatorycore/records", params=params)
+        return data if isinstance(data, list) else []
+
+    async def get_regulatory(
+        self,
+        amass_id: str,
+        *,
+        include_fda_details: bool = False,
+        include_ema_details: bool = False,
+        include_references_drugcore: bool = False,
+    ) -> dict[str, Any] | None:
+        params: list[tuple[str, str]] = []
+        if include_fda_details:
+            params.append(("include", "fdaDetails"))
+        if include_ema_details:
+            params.append(("include", "emaDetails"))
+        if include_references_drugcore:
+            params.append(("include", "referencesDrugCore"))
+        try:
+            data = await self._request(
+                "GET", f"/cores/regulatorycore/records/{amass_id}", params=params
+            )
+        except AmassError as e:
+            if "404" in str(e):
+                return None
+            raise
+        return data if isinstance(data, dict) else None
+
+    async def get_regulatory_document_section(
+        self, amass_id: str, document_section_id: str
+    ) -> dict[str, Any] | None:
+        """GET a single parsed source-document section (FDA label/review or EMA SmPC/EPAR)
+        with its full text. Discover section ids from `documentSections[]` on the record."""
+        try:
+            data = await self._request(
+                "GET",
+                f"/cores/regulatorycore/records/{amass_id}/document-sections/{document_section_id}",
+            )
+        except AmassError as e:
+            if "404" in str(e):
+                return None
+            raise
+        return data if isinstance(data, dict) else None
+
+    async def lookup_drugs(self, items: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """POST /cores/drugcore/records/lookup. Each item: chemblId."""
+        data = await self._request(
+            "POST", "/cores/drugcore/records/lookup", json_body={"items": items}
+        )
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return data["items"]
+        return []
+
+    async def lookup_regulatory(
+        self, items: list[dict[str, str]]
+    ) -> list[dict[str, Any]]:
+        """POST /cores/regulatorycore/records/lookup. Each item: exactly one of
+        fdaApplicationNumber, emaProductNumber, ndc, or splSetId."""
+        data = await self._request(
+            "POST", "/cores/regulatorycore/records/lookup", json_body={"items": items}
+        )
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return data["items"]
+        return []
 
     async def lookup_papers(
         self, items: list[dict[str, str]]

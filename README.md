@@ -1,6 +1,6 @@
 # Amass Platform Starter Agent
 
-An interactive agent for querying scientific literature and clinical trials via the [amass platform](https://platform.amass.tech/).
+An interactive agent for querying scientific literature, clinical trials, drugs/molecules, and FDA/EMA drug authorizations via the [amass platform](https://platform.amass.tech/) — across all four cores (BioMedCore, TrialCore, DrugCore, RegulatoryCore).
 Get your `AMASS_API_KEY` at https://platform.amass.tech/ and starter credits will be added to your account.
 
 > **Coding agent skills:** companion skills for Codex, GitHub Copilot, Claude Code and other agents are published at [amass-technologies/public-skills](https://github.com/amass-technologies/public-skills). Install the `amass-api` skill with or check the repository for examples of how to call the amass API from your own agents:
@@ -55,6 +55,12 @@ The router has a budget of 5 tool calls per turn. If exhausted, a nudge is injec
 | `search_trials` | TrialCore | Topic search over clinical trials |
 | `get_trial` | TrialCore | Fetch a trial by amass ID (`AMTC_...`) |
 | `lookup_trial` | TrialCore | Resolve an NCT ID, then fetch |
+| `search_drugs` | DrugCore | Search drugs/molecules, filter by modality and clinical stage |
+| `get_drug` | DrugCore | Fetch a drug by amass ID (`AMDC_...`), fan out to its trials, papers, and approvals |
+| `lookup_drug` | DrugCore | Resolve a ChEMBL ID, then fetch |
+| `search_regulatory` | RegulatoryCore | Cross-agency FDA + EMA authorization search (also full-text over labels/SmPCs/reviews/EPARs) |
+| `get_regulatory` | RegulatoryCore | Fetch an authorization by amass ID (`AMRC_...`), with US/EU cross-market link |
+| `lookup_regulatory` | RegulatoryCore | Resolve an FDA/EMA identifier (application number, product number, NDC, SPL set ID), then fetch |
 
 ## Project structure
 

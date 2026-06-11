@@ -1,4 +1,7 @@
-"""Interactive BAML-driven agent over the amass platform (BioMedCore + TrialCore).
+"""Interactive BAML-driven agent over the amass platform.
+
+Cores: BioMedCore (papers) · TrialCore (trials) · DrugCore (drugs/molecules) ·
+RegulatoryCore (FDA + EMA authorizations).
 
 Usage:
     uv run python -m src.main                        # drop into REPL
@@ -11,6 +14,10 @@ Supported question types:
     4. Trial search + filters:   "Find recruiting Phase 3 lung cancer drug trials in the US."
     5. Trial detail (cross-core): "Show me trial #1 with its referenced publications."
     6. Identifier lookup:        "Look up PMID 38123456" or "Show me trial NCT06012345"
+    7. Drug search (modality/stage): "What approved antibody drugs target checkpoint inhibition?"
+    8. Drug evidence base:       "What trials and approvals are tied to drug #1?"
+    9. Regulatory comparison:    "Is pembrolizumab approved in both the US and the EU?"
+   10. Regulatory doc full-text: "Which drugs mention immune-mediated hepatitis in their label?"
 """
 
 from __future__ import annotations
@@ -32,12 +39,34 @@ from .amass import AmassClient, AmassError
 from baml_client import b
 from baml_client.types import (
     FinalAnswer,
+    GetDrug,
     GetPaper,
+    GetRegulatory,
     GetTrial,
+    LookupDrug,
     LookupPaper,
+    LookupRegulatory,
     LookupTrial,
+    SearchDrugs,
     SearchPapers,
+    SearchRegulatory,
     SearchTrials,
+)
+
+# Union of every router-emitted tool request, used throughout dispatch / formatting / printing.
+ToolRequest = (
+    SearchPapers
+    | GetPaper
+    | SearchTrials
+    | GetTrial
+    | LookupPaper
+    | LookupTrial
+    | SearchDrugs
+    | GetDrug
+    | LookupDrug
+    | SearchRegulatory
+    | GetRegulatory
+    | LookupRegulatory
 )
 
 # Max tool calls per user turn. If the router hasn't produced a FinalAnswer by then, we inject
@@ -58,7 +87,7 @@ err_console = Console(stderr=True, highlight=False)
 AMASS_COLOR = "#f84016"
 
 
-_AMASS_ID_RE = re.compile(r"(AM[BT]C_[A-Za-z0-9]+)")
+_AMASS_ID_RE = re.compile(r"(AM[BTDR]C_[A-Za-z0-9]+)")
 
 
 def _amass_id(aid: str) -> str:
@@ -85,6 +114,12 @@ EXAMPLE_QUERIES = [
     "Show me trial NCT00953732 with results if available and associated publications.",
     # 8. Get trial by acronym
     "Show me the ALPHA3 trial.",
+    # 9. Drug modality + stage search (DrugCore) -> SearchDrugs
+    "What approved antibody drugs target checkpoint inhibition?",
+    # 10. Regulatory US-vs-EU comparison (RegulatoryCore) -> SearchRegulatory
+    "Is pembrolizumab approved in both the US and the EU?",
+    # 11. Regulatory full-text document search (RegulatoryCore) -> SearchRegulatory
+    "Which approved drugs mention immune-mediated hepatitis in their label?",
 ]
 
 PAPER_SEARCH_FIELDS_KEEP = (
@@ -113,6 +148,30 @@ TRIAL_GET_FIELDS_KEEP = (
     "isFdaRegulatedDrug", "isFdaRegulatedDevice",
     "armGroups", "referencesBiomedCore", "oversightHasDmc",
 )
+DRUG_SEARCH_FIELDS_KEEP = (
+    "amassId", "chemblId", "name", "drugType", "maxClinicalStage",
+    "synonyms", "tradeNames", "description",
+)
+DRUG_GET_FIELDS_KEEP = (
+    "amassId", "chemblId", "name", "description",
+    "synonyms", "tradeNames", "drugType", "maxClinicalStage",
+    "inchiKey", "canonicalSmiles", "parent", "children",
+)
+REGULATORY_SEARCH_FIELDS_KEEP = (
+    "amassId", "agency", "name", "activeSubstance", "moleculeType",
+    "authorizationStatus", "procedureType", "marketingAuthorisationHolder",
+    "authorizationDate", "firstAuthorizationDate", "isOrphan",
+    "therapeuticIndication", "designations", "authorizationsByAgency",
+    "documentSections",
+)
+REGULATORY_GET_FIELDS_KEEP = (
+    "amassId", "agency", "name", "activeSubstance", "moleculeType",
+    "authorizationStatus", "procedureType", "therapeuticIndication",
+    "marketingAuthorisationHolder", "authorizationDate", "firstAuthorizationDate",
+    "lastUpdateDate", "sourceUrl", "isOrphan",
+    "designations", "authorizationsByAgency",
+    "fdaDetails", "emaDetails", "referencesDrugCore",
+)
 MAX_CROSS_CORE_REFS = 5
 
 
@@ -140,8 +199,18 @@ def render_digest(last_results: list[dict[str, Any]]) -> str:
     lines = []
     for i, rec in enumerate(last_results, 1):
         amass_id = rec.get("amassId") or "?"
-        # Trial records have briefTitle + sponsorName + phase/status; papers have title + authors.
-        if rec.get("briefTitle") or amass_id.startswith("AMTC_"):
+        # Disambiguate by amassId prefix (then by shape) — each core has a distinct digest line.
+        if amass_id.startswith("AMDC_") or (rec.get("drugType") and not rec.get("agency")):
+            name = rec.get("name") or "(unnamed)"
+            dtype = rec.get("drugType") or "?"
+            stage = rec.get("maxClinicalStage") or "?"
+            lines.append(f"{i}. {name} — {dtype}, {stage} — {amass_id}")
+        elif amass_id.startswith("AMRC_") or rec.get("agency"):
+            name = rec.get("name") or "(unnamed)"
+            agency = rec.get("agency") or "?"
+            status = rec.get("authorizationStatus") or "?"
+            lines.append(f"{i}. {name} — {agency} · {status} — {amass_id}")
+        elif rec.get("briefTitle") or amass_id.startswith("AMTC_"):
             title = rec.get("briefTitle") or "(untitled)"
             sponsor = rec.get("sponsorName") or "?"
             phase = rec.get("phase") or "?"
@@ -197,6 +266,142 @@ def trim_trial_record(rec: dict[str, Any]) -> dict[str, Any]:
     if "_references" in rec:
         trimmed["_references"] = rec["_references"]
     return trimmed
+
+
+def trim_drug_search_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in DRUG_SEARCH_FIELDS_KEEP if k in rec}
+    desc = trimmed.get("description")
+    if isinstance(desc, str) and len(desc) > 400:
+        trimmed["description"] = desc[:400] + " …[truncated]"
+    return trimmed
+
+
+def trim_drug_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in DRUG_GET_FIELDS_KEEP if k in rec}
+    desc = trimmed.get("description")
+    if isinstance(desc, str) and len(desc) > 1000:
+        trimmed["description"] = desc[:1000] + " …[truncated]"
+    for key in ("_referencesTrialCore", "_referencesBiomedCore", "_referencesRegulatoryCore"):
+        if key in rec:
+            trimmed[key] = rec[key]
+    return trimmed
+
+
+def trim_regulatory_search_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in REGULATORY_SEARCH_FIELDS_KEEP if k in rec}
+    ind = trimmed.get("therapeuticIndication")
+    if isinstance(ind, str) and len(ind) > 400:
+        trimmed["therapeuticIndication"] = ind[:400] + " …[truncated]"
+    trimmed["documentSections"] = _trim_doc_sections(trimmed.get("documentSections"))
+    if not trimmed["documentSections"]:
+        trimmed.pop("documentSections", None)
+    return trimmed
+
+
+def trim_regulatory_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in REGULATORY_GET_FIELDS_KEEP if k in rec}
+    ind = trimmed.get("therapeuticIndication")
+    if isinstance(ind, str) and len(ind) > 1500:
+        trimmed["therapeuticIndication"] = ind[:1500] + " …[truncated]"
+    if "_referencesDrugCore" in rec:
+        trimmed["_referencesDrugCore"] = rec["_referencesDrugCore"]
+    return trimmed
+
+
+def _trim_doc_sections(sections: Any) -> list[dict[str, Any]]:
+    """Keep only the identifying fields of RegulatoryCore documentSections, with a short
+    matchedText excerpt when present (search evidence)."""
+    if not isinstance(sections, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for s in sections[:MAX_CROSS_CORE_REFS]:
+        if not isinstance(s, dict):
+            continue
+        keep = {k: s.get(k) for k in ("documentSectionId", "docType", "path", "title") if k in s}
+        matched = s.get("matchedText")
+        if isinstance(matched, str):
+            keep["matchedText"] = matched[:300] + (" …" if len(matched) > 300 else "")
+        out.append(keep)
+    return out
+
+
+async def _fetch_drug_with_refs(
+    amass: AmassClient,
+    amass_id: str,
+    *,
+    include_references_trialcore: bool = False,
+    include_references_biomedcore: bool = False,
+    include_references_regulatorycore: bool = False,
+) -> dict[str, Any] | None:
+    raw = await amass.get_drug(
+        amass_id,
+        include_references_trialcore=include_references_trialcore,
+        include_references_biomedcore=include_references_biomedcore,
+        include_references_regulatorycore=include_references_regulatorycore,
+    )
+    if raw is None:
+        return None
+    # Cross-core enrichment: parallel-fetch a few linked records per requested direction.
+    if include_references_trialcore:
+        ids = (raw.get("referencesTrialCore") or [])[:MAX_CROSS_CORE_REFS]
+        if ids:
+            refs = await asyncio.gather(
+                *(amass.get_trial(rid, include_outcomes=False) for rid in ids),
+                return_exceptions=True,
+            )
+            raw["_referencesTrialCore"] = [
+                trim_trial_search_record(r) for r in refs if isinstance(r, dict)
+            ]
+    if include_references_biomedcore:
+        ids = (raw.get("referencesBiomedCore") or [])[:MAX_CROSS_CORE_REFS]
+        if ids:
+            refs = await asyncio.gather(
+                *(amass.get_paper(rid, include_fulltext=False, include_authors_metadata=False) for rid in ids),
+                return_exceptions=True,
+            )
+            raw["_referencesBiomedCore"] = [
+                trim_paper_search_record(r) for r in refs if isinstance(r, dict)
+            ]
+    if include_references_regulatorycore:
+        ids = (raw.get("referencesRegulatoryCore") or [])[:MAX_CROSS_CORE_REFS]
+        if ids:
+            refs = await asyncio.gather(
+                *(amass.get_regulatory(rid) for rid in ids),
+                return_exceptions=True,
+            )
+            raw["_referencesRegulatoryCore"] = [
+                trim_regulatory_search_record(r) for r in refs if isinstance(r, dict)
+            ]
+    return raw
+
+
+async def _fetch_regulatory_with_refs(
+    amass: AmassClient,
+    amass_id: str,
+    *,
+    include_fda_details: bool = False,
+    include_ema_details: bool = False,
+    include_references_drugcore: bool = False,
+) -> dict[str, Any] | None:
+    raw = await amass.get_regulatory(
+        amass_id,
+        include_fda_details=include_fda_details,
+        include_ema_details=include_ema_details,
+        include_references_drugcore=include_references_drugcore,
+    )
+    if raw is None:
+        return None
+    if include_references_drugcore:
+        ids = (raw.get("referencesDrugCore") or [])[:MAX_CROSS_CORE_REFS]
+        if ids:
+            refs = await asyncio.gather(
+                *(amass.get_drug(rid) for rid in ids),
+                return_exceptions=True,
+            )
+            raw["_referencesDrugCore"] = [
+                trim_drug_search_record(r) for r in refs if isinstance(r, dict)
+            ]
+    return raw
 
 
 async def _fetch_trial_with_refs(
@@ -263,7 +468,7 @@ def _extract_lookup_amass_id(
 
 async def dispatch(
     amass: AmassClient,
-    req: SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial,
+    req: ToolRequest,
 ) -> tuple[str, Any]:
     if isinstance(req, SearchPapers):
         raw = await amass.search_papers(
@@ -352,10 +557,94 @@ async def dispatch(
         if raw is None:
             return "get_trial", {"error": f"resolved {ident} → {amass_id} but fetch returned 404"}
         return "get_trial", trim_trial_record(raw)
+    if isinstance(req, SearchDrugs):
+        raw = await amass.search_drugs(
+            query=req.query,
+            limit=req.limit or 20,
+            drug_type=req.drug_type,
+            max_clinical_stage=req.max_clinical_stage,
+        )
+        return "search_drugs", [trim_drug_search_record(r) for r in raw]
+    if isinstance(req, GetDrug):
+        raw = await _fetch_drug_with_refs(
+            amass,
+            req.amass_id,
+            include_references_trialcore=bool(req.include_references_trialcore),
+            include_references_biomedcore=bool(req.include_references_biomedcore),
+            include_references_regulatorycore=bool(req.include_references_regulatorycore),
+        )
+        if raw is None:
+            return "get_drug", {"error": f"no drug found for {req.amass_id}"}
+        return "get_drug", trim_drug_record(raw)
+    if isinstance(req, LookupDrug):
+        ident = f"ChEMBL {req.chembl_id}"
+        results = await amass.lookup_drugs([{"chemblId": req.chembl_id}])
+        amass_id, err = _extract_lookup_amass_id(results)
+        if err:
+            return "get_drug", {"error": f"lookup failed for {ident}: {err}"}
+        if not amass_id:
+            return "get_drug", {"error": f"no DrugCore record found for {ident}"}
+        raw = await amass.get_drug(amass_id)
+        if raw is None:
+            return "get_drug", {"error": f"resolved {ident} → {amass_id} but fetch returned 404"}
+        return "get_drug", trim_drug_record(raw)
+    if isinstance(req, SearchRegulatory):
+        raw = await amass.search_regulatory(
+            query=req.query,
+            limit=req.limit or 20,
+            agency=req.agency,
+            molecule_type=req.molecule_type,
+            authorization_status=req.authorization_status,
+            has_designation=req.has_designation,
+            is_orphan=req.is_orphan,
+            min_authorization_date=req.min_authorization_date,
+            max_authorization_date=req.max_authorization_date,
+        )
+        return "search_regulatory", [trim_regulatory_search_record(r) for r in raw]
+    if isinstance(req, GetRegulatory):
+        raw = await _fetch_regulatory_with_refs(
+            amass,
+            req.amass_id,
+            include_fda_details=bool(req.include_fda_details),
+            include_ema_details=bool(req.include_ema_details),
+            include_references_drugcore=bool(req.include_references_drugcore),
+        )
+        if raw is None:
+            return "get_regulatory", {"error": f"no authorization found for {req.amass_id}"}
+        return "get_regulatory", trim_regulatory_record(raw)
+    if isinstance(req, LookupRegulatory):
+        # Exactly one identifier, per AMASS.md. Prefer in a stable order if several are set.
+        if req.fda_application_number:
+            item = {"fdaApplicationNumber": req.fda_application_number}
+            ident = f"FDA {req.fda_application_number}"
+        elif req.ema_product_number:
+            item = {"emaProductNumber": req.ema_product_number}
+            ident = f"EMA {req.ema_product_number}"
+        elif req.ndc:
+            item = {"ndc": req.ndc}
+            ident = f"NDC {req.ndc}"
+        elif req.spl_set_id:
+            item = {"splSetId": req.spl_set_id}
+            ident = f"SPL {req.spl_set_id}"
+        else:
+            return "get_regulatory", {
+                "error": "lookup_regulatory requires one of fda_application_number, "
+                "ema_product_number, ndc, or spl_set_id"
+            }
+        results = await amass.lookup_regulatory([item])
+        amass_id, err = _extract_lookup_amass_id(results)
+        if err:
+            return "get_regulatory", {"error": f"lookup failed for {ident}: {err}"}
+        if not amass_id:
+            return "get_regulatory", {"error": f"no RegulatoryCore record found for {ident}"}
+        raw = await amass.get_regulatory(amass_id)
+        if raw is None:
+            return "get_regulatory", {"error": f"resolved {ident} → {amass_id} but fetch returned 404"}
+        return "get_regulatory", trim_regulatory_record(raw)
     raise TypeError(f"Unknown tool request: {type(req).__name__}")
 
 
-def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial) -> str:
+def _format_call(req: ToolRequest) -> str:
     if isinstance(req, SearchPapers):
         bits = [f"query={req.query!r}", f"limit={req.limit or 20}"]
         if req.min_publication_date:
@@ -399,13 +688,61 @@ def _format_call(req: SearchPapers | GetPaper | SearchTrials | GetTrial | Lookup
         inc_ft = True if req.include_fulltext is None else req.include_fulltext
         ident = f"pmid={req.pmid!r}" if req.pmid else f"doi={req.doi!r}"
         return f"lookup_paper({ident}, include_fulltext={inc_ft})"
-    inc_out = True if req.include_outcomes is None else req.include_outcomes
-    inc_ref = True if req.include_references is None else req.include_references
-    return f"lookup_trial(nct_id={req.nct_id!r}, include_outcomes={inc_out}, include_references={inc_ref})"
+    if isinstance(req, LookupTrial):
+        inc_out = True if req.include_outcomes is None else req.include_outcomes
+        inc_ref = True if req.include_references is None else req.include_references
+        return f"lookup_trial(nct_id={req.nct_id!r}, include_outcomes={inc_out}, include_references={inc_ref})"
+    if isinstance(req, SearchDrugs):
+        bits = [f"query={req.query!r}", f"limit={req.limit or 20}"]
+        if req.drug_type:
+            bits.append(f"drug_type={req.drug_type}")
+        if req.max_clinical_stage:
+            bits.append(f"max_clinical_stage={req.max_clinical_stage}")
+        return "search_drugs(" + ", ".join(bits) + ")"
+    if isinstance(req, GetDrug):
+        bits = [f"amass_id={req.amass_id!r}"]
+        if req.include_references_trialcore:
+            bits.append("include_references_trialcore=True")
+        if req.include_references_biomedcore:
+            bits.append("include_references_biomedcore=True")
+        if req.include_references_regulatorycore:
+            bits.append("include_references_regulatorycore=True")
+        return "get_drug(" + ", ".join(bits) + ")"
+    if isinstance(req, LookupDrug):
+        return f"lookup_drug(chembl_id={req.chembl_id!r})"
+    if isinstance(req, SearchRegulatory):
+        bits = [f"query={req.query!r}", f"limit={req.limit or 20}"]
+        for name in (
+            "agency", "molecule_type", "authorization_status", "has_designation",
+            "min_authorization_date", "max_authorization_date",
+        ):
+            v = getattr(req, name)
+            if v:
+                bits.append(f"{name}={v}")
+        if req.is_orphan is not None:
+            bits.append(f"is_orphan={req.is_orphan}")
+        return "search_regulatory(" + ", ".join(bits) + ")"
+    if isinstance(req, GetRegulatory):
+        bits = [f"amass_id={req.amass_id!r}"]
+        if req.include_fda_details:
+            bits.append("include_fda_details=True")
+        if req.include_ema_details:
+            bits.append("include_ema_details=True")
+        if req.include_references_drugcore:
+            bits.append("include_references_drugcore=True")
+        return "get_regulatory(" + ", ".join(bits) + ")"
+    # LookupRegulatory
+    ident = (
+        f"fda_application_number={req.fda_application_number!r}" if req.fda_application_number
+        else f"ema_product_number={req.ema_product_number!r}" if req.ema_product_number
+        else f"ndc={req.ndc!r}" if req.ndc
+        else f"spl_set_id={req.spl_set_id!r}"
+    )
+    return f"lookup_regulatory({ident})"
 
 
 def print_router_decision(
-    route: SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | FinalAnswer,
+    route: ToolRequest | FinalAnswer,
     *,
     step: int | None = None,
 ) -> None:
@@ -421,7 +758,7 @@ def print_router_decision(
 
 
 def print_amass_results(
-    req: SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial,
+    req: ToolRequest,
     tool_name: str,
     tool_result: Any,
 ) -> None:
@@ -548,6 +885,129 @@ def print_amass_results(
                 if len(refs) > 3:
                     lines.append(f"  [dim](+{len(refs) - 3} more)[/dim]")
 
+    elif tool_name == "search_drugs":
+        border = "magenta"
+        records = tool_result if isinstance(tool_result, list) else []
+        if not records:
+            lines.append("[dim](no records returned)[/dim]")
+        else:
+            lines.append(f"[dim]{len(records)} drug(s)[/dim]")
+            for i, r in enumerate(records, 1):
+                name = escape((r.get("name") or "(unnamed)").strip())
+                dtype = escape(r.get("drugType") or "?")
+                stage = escape(r.get("maxClinicalStage") or "?")
+                amass_id = r.get("amassId") or "?"
+                chembl = r.get("chemblId") or "?"
+                trades = escape(", ".join((r.get("tradeNames") or [])[:3]) or "—")
+                lines.append(f" [bold]{i:>2}.[/bold] {name}")
+                lines.append(f"     [dim]{dtype} · {stage}[/dim] · trade: {trades}")
+                lines.append(f"     {_amass_id(amass_id)} [dim]· {chembl}[/dim]")
+
+    elif tool_name == "get_drug":
+        border = "magenta"
+        if isinstance(tool_result, dict) and "error" in tool_result and len(tool_result) == 1:
+            lines.append(f"[red]{escape(tool_result['error'])}[/red]")
+        elif isinstance(tool_result, dict):
+            r = tool_result
+            lines.append(f"[bold]{escape((r.get('name') or '(unnamed)').strip())}[/bold]")
+            lines.append(
+                f"[dim]{escape(r.get('drugType') or '?')} · {escape(r.get('maxClinicalStage') or '?')}"
+                f" · {r.get('chemblId') or '?'}[/dim]"
+            )
+            lines.append(f"{_amass_id(r.get('amassId') or '?')}")
+            trades = r.get("tradeNames") or []
+            if trades:
+                lines.append(f"trade names: {escape(', '.join(trades[:6]))}")
+            for key, label, kind in (
+                ("_referencesTrialCore", "TrialCore", "trial"),
+                ("_referencesBiomedCore", "BioMedCore", "paper"),
+                ("_referencesRegulatoryCore", "RegulatoryCore", "regulatory"),
+            ):
+                refs = r.get(key) or []
+                if refs:
+                    lines.append(f"[green]cross-core: {len(refs)} {label} reference(s)[/green]")
+                    for ref in refs[:3]:
+                        if kind == "trial":
+                            label_txt = escape((ref.get("briefTitle") or "(untitled)").strip())
+                        elif kind == "paper":
+                            label_txt = escape((ref.get("title") or "(untitled)").strip())
+                        else:
+                            label_txt = escape(
+                                f"{ref.get('name') or '(unnamed)'} ({ref.get('agency') or '?'}, {ref.get('authorizationStatus') or '?'})"
+                            )
+                        lines.append(f"  · {label_txt} {_amass_id(ref.get('amassId') or '?')}")
+                    if len(refs) > 3:
+                        lines.append(f"  [dim](+{len(refs) - 3} more)[/dim]")
+
+    elif tool_name == "search_regulatory":
+        border = "green"
+        records = tool_result if isinstance(tool_result, list) else []
+        if not records:
+            lines.append("[dim](no records returned)[/dim]")
+        else:
+            lines.append(f"[dim]{len(records)} authorization(s)[/dim]")
+            for i, r in enumerate(records, 1):
+                name = escape((r.get("name") or "(unnamed)").strip())
+                agency = escape(r.get("agency") or "?")
+                status = escape(r.get("authorizationStatus") or "?")
+                amass_id = r.get("amassId") or "?"
+                holder = escape((r.get("marketingAuthorisationHolder") or "?").strip() or "?")
+                substance = escape(r.get("activeSubstance") or "?")
+                lines.append(f" [bold]{i:>2}.[/bold] {name} [dim]· {agency} · {status}[/dim]")
+                lines.append(f"     {substance} · {holder}")
+                lines.append(f"     {_amass_id(amass_id)}")
+                cross = r.get("authorizationsByAgency") or []
+                if cross:
+                    pairs = ", ".join(
+                        f"{escape(c.get('agency') or '?')}: {escape(c.get('authorizationStatus') or '?')}"
+                        for c in cross[:3]
+                    )
+                    lines.append(f"     [dim]other markets: {pairs}[/dim]")
+                docs = r.get("documentSections") or []
+                if docs:
+                    d = docs[0]
+                    lines.append(
+                        f"     [yellow]↳ {escape(d.get('docType') or '?')} {escape(d.get('path') or '')}"
+                        f" {escape(d.get('title') or '')}[/yellow]"
+                    )
+
+    elif tool_name == "get_regulatory":
+        border = "green"
+        if isinstance(tool_result, dict) and "error" in tool_result and len(tool_result) == 1:
+            lines.append(f"[red]{escape(tool_result['error'])}[/red]")
+        elif isinstance(tool_result, dict):
+            r = tool_result
+            lines.append(
+                f"[bold]{escape((r.get('name') or '(unnamed)').strip())}[/bold]"
+                f" [dim]· {escape(r.get('agency') or '?')} · {escape(r.get('authorizationStatus') or '?')}[/dim]"
+            )
+            lines.append(
+                f"{escape(r.get('activeSubstance') or '?')} · {escape(r.get('moleculeType') or '?')}"
+                f" · {escape(r.get('procedureType') or '?')}"
+            )
+            lines.append(f"{_amass_id(r.get('amassId') or '?')} [dim]· {escape(r.get('marketingAuthorisationHolder') or '?')}[/dim]")
+            lines.append(
+                f"[dim]authorized={(r.get('authorizationDate') or '?')[:10]}"
+                f" · orphan={r.get('isOrphan')}[/dim]"
+            )
+            desigs = r.get("designations") or []
+            if desigs:
+                names = ", ".join(escape(d.get("type") or "?") for d in desigs[:6])
+                lines.append(f"designations: {names}")
+            cross = r.get("authorizationsByAgency") or []
+            if cross:
+                lines.append(f"[green]cross-market: {len(cross)} other authorization(s)[/green]")
+                for c in cross[:3]:
+                    lines.append(
+                        f"  · {escape(c.get('agency') or '?')}: {escape(c.get('name') or '?')}"
+                        f" ({escape(c.get('authorizationStatus') or '?')}) {_amass_id(c.get('amassId') or '?')}"
+                    )
+            drug_refs = r.get("_referencesDrugCore") or []
+            if drug_refs:
+                lines.append(f"[green]active ingredient(s): {len(drug_refs)} DrugCore record(s)[/green]")
+                for ref in drug_refs[:3]:
+                    lines.append(f"  · {escape(ref.get('name') or '(unnamed)')} {_amass_id(ref.get('amassId') or '?')}")
+
     call_str = escape(_format_call(req))
     content = "\n".join(lines)
     console.print()
@@ -587,6 +1047,26 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
     if tool_name in ("get_trial",) and isinstance(tool_result, dict):
         keep = ("amassId", "nctId", "acronym", "briefTitle", "sponsorName", "phase", "overallStatus",
                 "conditions", "interventionNames", "enrollment", "_references")
+        return {k: tool_result.get(k) for k in keep if k in tool_result}
+    if tool_name == "search_drugs" and isinstance(tool_result, list):
+        return [
+            {k: r.get(k) for k in ("amassId", "name", "drugType", "maxClinicalStage", "chemblId") if k in r}
+            for r in tool_result
+        ]
+    if tool_name == "get_drug" and isinstance(tool_result, dict):
+        keep = ("amassId", "name", "drugType", "maxClinicalStage", "chemblId", "tradeNames",
+                "_referencesTrialCore", "_referencesBiomedCore", "_referencesRegulatoryCore")
+        return {k: tool_result.get(k) for k in keep if k in tool_result}
+    if tool_name == "search_regulatory" and isinstance(tool_result, list):
+        return [
+            {k: r.get(k) for k in ("amassId", "name", "agency", "authorizationStatus",
+                                   "activeSubstance", "authorizationsByAgency", "documentSections") if k in r}
+            for r in tool_result
+        ]
+    if tool_name == "get_regulatory" and isinstance(tool_result, dict):
+        keep = ("amassId", "name", "agency", "authorizationStatus", "activeSubstance",
+                "moleculeType", "isOrphan", "designations", "authorizationsByAgency",
+                "_referencesDrugCore")
         return {k: tool_result.get(k) for k in keep if k in tool_result}
     return tool_result
 
@@ -632,7 +1112,7 @@ async def turn(
 
         tool_name, tool_result = await dispatch(amass, route)
         print_amass_results(route, tool_name, tool_result)
-        if tool_name in ("search_papers", "search_trials") and isinstance(tool_result, list):
+        if tool_name in ("search_papers", "search_trials", "search_drugs", "search_regulatory") and isinstance(tool_result, list):
             new_last_results = tool_result
         observations.append({
             "tool": tool_name,

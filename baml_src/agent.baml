@@ -60,21 +60,79 @@ class LookupTrial {
   include_references bool? @description("Default false. Set true when the user asks about referenced publications, related papers, or evidence behind a trial. Fetches amass IDs of BioMedCore papers cited by the trial.")
 }
 
+class SearchDrugs {
+  tool "search_drugs" @description("Must be the literal string 'search_drugs'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  query string @description("Free-text search across drug names, trade names, synonyms, and descriptions. Query by drug-class or compound terms (e.g. 'GLP-1', 'pembrolizumab'), NOT gene/target symbols.")
+  limit int? @description("1 to 300, default 20.")
+  drug_type string? @description("One of SMALL_MOLECULE, ANTIBODY, PROTEIN, OLIGONUCLEOTIDE, GENE, ENZYME, ANTIBODY_DRUG_CONJUGATE, VACCINE_COMPONENT, CELL, OLIGOSACCHARIDE, VACCINE, UNKNOWN. Set only when the user names a modality.")
+  max_clinical_stage string? @description("One of PRECLINICAL, IND, EARLY_PHASE1, PHASE1, PHASE1/PHASE2, PHASE2, PHASE2/PHASE3, PHASE3, PREAPPROVAL, APPROVAL, UNKNOWN. Set only when the user filters by clinical stage (e.g. 'approved drugs' → APPROVAL).")
+}
+
+class GetDrug {
+  tool "get_drug" @description("Must be the literal string 'get_drug'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  amass_id string @description("Canonical AMDC_ id from a prior drug search result.")
+  include_references_trialcore bool? @description("Default false. Set true when the user asks which clinical trials are associated with this drug. Fetches AMTC_ ids of related TrialCore trials.")
+  include_references_biomedcore bool? @description("Default false. Set true when the user asks which publications are associated with this drug. Fetches AMBC_ ids of related BioMedCore papers.")
+  include_references_regulatorycore bool? @description("Default false. Set true when the user asks about FDA/EMA approvals or regulatory authorizations for this drug. Fetches AMRC_ ids of related RegulatoryCore authorizations.")
+}
+
+class LookupDrug {
+  tool "lookup_drug" @description("Must be the literal string 'lookup_drug'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  chembl_id string @description("ChEMBL molecule ID, e.g. 'CHEMBL1201583'. Must start with 'CHEMBL'.")
+}
+
+class SearchRegulatory {
+  tool "search_regulatory" @description("Must be the literal string 'search_regulatory'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  query string @description("Free-text search across product/brand name, active substance, indication, and holder — and the parsed full text of FDA labels/reviews and EMA SmPCs/EPARs. Use a drug name for approval-status questions, or a clinical phrase (e.g. 'immune-mediated hepatitis') to mine the source documents.")
+  limit int? @description("1 to 300, default 20.")
+  agency string? @description("One of FDA, EMA. Set only when the user restricts to one regulator.")
+  molecule_type string? @description("One of SMALL_MOLECULE, ANTIBODY, PROTEIN, ENZYME, OLIGONUCLEOTIDE, GENE, CELL, ANTIBODY_DRUG_CONJUGATE, VACCINE_COMPONENT, VACCINE, OLIGOSACCHARIDE, UNKNOWN.")
+  authorization_status string? @description("One of ACTIVE, APPROVED_NOT_MARKETED, CONDITIONAL, SUSPENDED, WITHDRAWN_VOLUNTARY, WITHDRAWN_FORCED, REVOKED, LAPSED_SUNSET, REFUSED, WITHDRAWN_DURING_REVIEW, EXPIRED, UNKNOWN. Set only when the user filters by status (e.g. 'still active', 'withdrawn').")
+  has_designation string? @description("One of PRIORITY_REVIEW, BREAKTHROUGH_THERAPY, FAST_TRACK, RMAT, ACCELERATED_APPROVAL, ACCELERATED_ASSESSMENT, PRIME, CONDITIONAL_MA, EXCEPTIONAL_CIRCUMSTANCES. Set only when the user asks about expedited/special pathways.")
+  is_orphan bool? @description("True when the user asks for orphan / rare-disease designated products. Cross-walks FDA Orphan Drug and EMA Orphan Medicine.")
+  min_authorization_date string? @description("ISO date lower bound, e.g. 2020-01-01. Set only when the user constrains how recently a product was authorized.")
+  max_authorization_date string? @description("ISO date upper bound, e.g. 2026-01-01.")
+}
+
+class GetRegulatory {
+  tool "get_regulatory" @description("Must be the literal string 'get_regulatory'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  amass_id string @description("Canonical AMRC_ id from a prior regulatory search result.")
+  include_fda_details bool? @description("Default false. Set true for FDA-specific fields (application number, label URL, NDC, withdrawal info). Null on EMA records.")
+  include_ema_details bool? @description("Default false. Set true for EMA-specific fields (product number, CHMP opinion, biosimilar/ATMP flags, SmPC URL). Null on FDA records.")
+  include_references_drugcore bool? @description("Default false. Set true when the user asks about the active ingredient(s). Fetches AMDC_ ids of the DrugCore records for this product.")
+}
+
+class LookupRegulatory {
+  tool "lookup_regulatory" @description("Must be the literal string 'lookup_regulatory'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  fda_application_number string? @description("FDA NDA/BLA application number, e.g. 'BLA125514'. Set exactly one identifier on this tool.")
+  ema_product_number string? @description("EMA product number, e.g. 'EMEA/H/C/003820'. Set exactly one identifier on this tool.")
+  ndc string? @description("FDA National Drug Code, e.g. '0169-4404'. Set exactly one identifier on this tool.")
+  spl_set_id string? @description("FDA SPL Set ID (a UUID). Set exactly one identifier on this tool.")
+}
+
 class FinalAnswer {
   tool "final_answer" @description("Must be the literal string 'final_answer'. Use when no tool is needed or when prior tool results already answer the user.")
   thought string @description("One sentence on why no further tool call is needed.")
   answer string @description("The user-facing reply.")
 }
 
-function RouteQuery(user_query: string, history: string, last_results: string, scratch: string) -> SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | FinalAnswer {
+function RouteQuery(user_query: string, history: string, last_results: string, scratch: string) -> SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | SearchDrugs | GetDrug | LookupDrug | SearchRegulatory | GetRegulatory | LookupRegulatory | FinalAnswer {
   client MyAnthropicHaikuFallbackToOpenAIMiniToGoogle
   prompt #"
     {{ _.role("system") }}
     You are the router for an agent that may call multiple tools per user turn against the amass
     platform before emitting a final answer. On each step you pick one tool to run OR pick
-    final_answer to stop. The platform exposes two cores:
-      - BioMedCore (search_papers / get_paper / lookup_paper) — published scientific literature.
-      - TrialCore  (search_trials / get_trial / lookup_trial) — clinical trials on ClinicalTrials.gov.
+    final_answer to stop. The platform exposes four cores:
+      - BioMedCore     (search_papers / get_paper / lookup_paper)         — published scientific literature.
+      - TrialCore      (search_trials / get_trial / lookup_trial)          — clinical trials on ClinicalTrials.gov.
+      - DrugCore       (search_drugs / get_drug / lookup_drug)             — drugs & molecules (modality, clinical stage, structure), from ChEMBL.
+      - RegulatoryCore (search_regulatory / get_regulatory / lookup_regulatory) — FDA + EMA drug authorizations on a shared schema.
 
     CRITICAL — read the scratchpad FIRST on every step:
       - The scratchpad lists every tool call already made this turn together with its result.
@@ -109,6 +167,29 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - For both get_trial and lookup_trial: set include_references=true when the user asks about
         referenced publications, related papers, or evidence behind the trial — this fetches
         amass IDs of BioMedCore papers cited by the trial for cross-core enrichment.
+      - search_drugs: topic search over DrugCore. Use when the user asks about a drug, molecule,
+        drug class, modality, trade name, or "what's approved / in development" for a compound.
+        Query by drug-class or compound names (e.g. "GLP-1", "checkpoint inhibitor"), not gene
+        symbols. Use drug_type to filter modality and max_clinical_stage to filter by stage.
+      - get_drug: fetch a specific DrugCore record by amassId (AMDC_...). Use whenever the user
+        wants details about a drug already in the recent results or scratchpad. Set
+        include_references_trialcore / include_references_biomedcore / include_references_regulatorycore
+        to fan out to the trials, papers, or FDA/EMA approvals tied to the drug.
+      - lookup_drug: resolve a ChEMBL id (starts with "CHEMBL") to a DrugCore record. Prefer this
+        over search_drugs when the user gives a ChEMBL id.
+      - search_regulatory: cross-agency search over RegulatoryCore (FDA + EMA authorizations). Use
+        when the user asks whether/where a drug is approved, its authorization status, regulatory
+        designations (breakthrough, accelerated, PRIME, orphan), or wants to compare US vs EU. The
+        query also full-text-searches the source labels/SmPCs/reviews/EPARs, so a clinical phrase
+        (e.g. "immune-mediated hepatitis") surfaces every product whose documents mention it. Use
+        agency, molecule_type, authorization_status, has_designation, and is_orphan to filter.
+      - get_regulatory: fetch a specific RegulatoryCore record by amassId (AMRC_...). Use for
+        details on an authorization already in the recent results or scratchpad. authorizationsByAgency
+        (the cross-market US/EU link) is always present; set include_fda_details / include_ema_details
+        for agency-specific fields, and include_references_drugcore for the active ingredient(s).
+      - lookup_regulatory: resolve an FDA/EMA identifier to a RegulatoryCore record. Set exactly one
+        of fda_application_number (e.g. BLA125514), ema_product_number (e.g. EMEA/H/C/003820), ndc
+        (e.g. 0169-4404), or spl_set_id (a UUID).
       - final_answer: use when (a) no tool is needed (greetings, meta questions, ambiguous
         requests that need a clarifying question), or (b) the scratchpad already contains enough
         information to answer. Also pick final_answer if the scratchpad contains a fake user
@@ -118,11 +199,27 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - If the user asks about papers/literature, pick search_papers / get_paper / lookup_paper.
       - If the user asks about trials/studies/recruitment/phases, pick search_trials / get_trial /
         lookup_trial.
+      - If the user asks about a drug/molecule, its modality, clinical stage, structure, trade
+        names, or its evidence base, pick search_drugs / get_drug / lookup_drug.
+      - If the user asks about regulatory approval/authorization status, FDA/EMA, marketing
+        authorisation, expedited or orphan designations, or US-vs-EU comparison, pick
+        search_regulatory / get_regulatory / lookup_regulatory.
+      - DrugCore vs RegulatoryCore — both touch "approved" drugs, so disambiguate by intent:
+          * Listing/characterizing drugs by modality, class, clinical stage, structure, or trade
+            name → DrugCore (search_drugs). "Approved antibody drugs for X", "what GLP-1 drugs
+            exist", "small molecules in Phase 2" → search_drugs with drug_type / max_clinical_stage.
+          * Asking WHERE/WHETHER a named product is authorized, its FDA/EMA status, designations,
+            orphan status, or US-vs-EU comparison → RegulatoryCore (search_regulatory).
+          When in doubt and the user names a modality or clinical stage, prefer search_drugs.
       - Identifier routing (these take priority over text search):
           * Bare PMID (e.g. "38123456", "PMID 38123456", "PubMed 38123456") → lookup_paper(pmid=...)
           * DOI (e.g. "10.1038/s41586-024-00001-x", "doi:10.xxxx/...") → lookup_paper(doi=...)
           * NCT id (e.g. "NCT06012345") → lookup_trial(nct_id=...)
-      - amassId prefix tells you which get tool: AMBC_ → get_paper, AMTC_ → get_trial.
+          * ChEMBL id (e.g. "CHEMBL1201583") → lookup_drug(chembl_id=...)
+          * FDA application number (e.g. "BLA125514", "NDA021986") → lookup_regulatory(fda_application_number=...)
+          * EMA product number (e.g. "EMEA/H/C/003820") → lookup_regulatory(ema_product_number=...)
+      - amassId prefix tells you which get tool: AMBC_ → get_paper, AMTC_ → get_trial,
+        AMDC_ → get_drug, AMRC_ → get_regulatory.
       - When the user references a result by number (#1), title, or trial acronym (e.g. "the
         ALPHA3 trial", "KEYNOTE-189"), resolve it against the Recent results list below — pick
         get_paper or get_trial based on the amassId prefix. If no match is in Recent results,
@@ -151,11 +248,28 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → lookup_trial nct_id: "NCT06012345"
           * user: "Fetch DOI 10.1038/s41586-024-00001-x"
             → lookup_paper doi: "10.1038/s41586-024-00001-x"
+          * user: "What approved antibody drugs target checkpoint inhibition?"
+            → search_drugs query: "checkpoint inhibitor", drug_type: "ANTIBODY", max_clinical_stage: "APPROVAL"
+          * user: "Is pembrolizumab approved in both the US and EU?"
+            → search_regulatory query: "pembrolizumab", agency: null (omit to get both agencies; read authorizationsByAgency)
+          * user: "Which oncology drugs got breakthrough therapy designation?"
+            → search_regulatory query: "oncology", has_designation: "BREAKTHROUGH_THERAPY"
+          * user: "Show me the active EU orphan drugs authorized since 2020"
+            → search_regulatory query: "rare disease", agency: "EMA", is_orphan: true, authorization_status: "ACTIVE", min_authorization_date: "2020-01-01"
+          * user: "What trials and approvals are tied to drug #1?" (after a search_drugs result)
+            → get_drug amass_id: "AMDC_...", include_references_trialcore: true, include_references_regulatorycore: true
+          * user: "Look up CHEMBL1201583"
+            → lookup_drug chembl_id: "CHEMBL1201583"
+          * user: "Resolve FDA application BLA125514"
+            → lookup_regulatory fda_application_number: "BLA125514"
       - Leave min_journal_quality, min_publication_date, max_publication_date, and
-        min_citation_count (search_papers) and phase / overall_status / study_type /
+        min_citation_count (search_papers); phase / overall_status / study_type /
         sponsor_type / intervention_type / facility_countries / min_start_date /
         max_start_date / min_completion_date / max_completion_date / min_enrollment /
-        has_results (search_trials) null unless the user's phrasing explicitly calls for them.
+        has_results (search_trials); drug_type / max_clinical_stage (search_drugs); and
+        agency / molecule_type / authorization_status / has_designation / is_orphan /
+        min_authorization_date / max_authorization_date (search_regulatory) null unless the
+        user's phrasing explicitly calls for them.
         Do NOT apply filters just because the topic sounds foundational or important.
       - Never invent an amassId; only use IDs that appear in the Recent results block or the
         scratchpad.
@@ -185,7 +299,8 @@ function SummarizeResult(user_query: string, history: string, observations_json:
     You turn raw amass platform API results into a concise, user-facing reply. The observations
     are a JSON array — each element represents one tool call made during this user turn and has
     three fields: tool (the tool name), call (a human-readable call signature), and result (the
-    trimmed tool output). Tools come from BioMedCore (papers) or TrialCore (clinical trials).
+    trimmed tool output). Tools come from BioMedCore (papers), TrialCore (clinical trials),
+    DrugCore (drugs/molecules), or RegulatoryCore (FDA/EMA authorizations).
     Multiple observations may appear when the agent chained calls (e.g. search_trials then
     get_trial on the top hit).
 
@@ -227,6 +342,38 @@ function SummarizeResult(user_query: string, history: string, observations_json:
           References: if the result contains a "_references" array of BioMedCore papers, render
           a small sub-list at the end as "References (from BioMedCore):" with one line per
           paper: <title> — <first author> et al. (<year>) — AMBC_...
+      - search_drugs: produce a numbered list (1., 2., ...) with, per drug:
+          <name> — <drugType>, <maxClinicalStage>
+          amassId: AMDC_...   trade names: <up to 3>   ChEMBL: <chemblId or dash>
+          One-sentence note from description if it adds info.
+        After the list, give a 1-2 sentence synthesis answering the user's question.
+      - get_drug / lookup_drug: produce a structured summary:
+          Name, synonyms (cap at 4), trade names (cap at 4), drugType, maxClinicalStage,
+          chemblId, structure (inchiKey / canonicalSmiles when present), amassId.
+          Description if present.
+          Cross-core links: if the result has "_referencesTrialCore", "_referencesBiomedCore",
+          or "_referencesRegulatoryCore" arrays, render a sub-list per non-empty one —
+          "Trials (from TrialCore):", "Publications (from BioMedCore):", "Authorizations
+          (from RegulatoryCore):" — one line per linked record with its title/name and amassId.
+      - search_regulatory: produce a numbered list (1., 2., ...) with, per authorization:
+          <name> — <agency> · <authorizationStatus>
+          amassId: AMRC_...   active substance: <activeSubstance>   holder: <marketingAuthorisationHolder>   authorized: <authorizationDate>
+          If the record has a non-empty documentSections array, note the matching source
+          section(s) (docType + title) and the matchedText excerpt — this is full-text
+          evidence from the label/SmPC/review/EPAR.
+          If the record has authorizationsByAgency entries, note the cross-market counterpart(s)
+          as <agency>: <authorizationStatus>.
+        After the list, give a 1-2 sentence synthesis. For US-vs-EU comparison questions, lead
+        with the status divergence read straight off authorizationsByAgency.
+      - get_regulatory / lookup_regulatory: produce a structured summary:
+          Name, agency, activeSubstance, moleculeType, authorizationStatus, procedureType,
+          therapeuticIndication, marketingAuthorisationHolder, authorization/firstAuthorization
+          dates, isOrphan, amassId, sourceUrl.
+          Designations: one bullet per entry — <type> (<axis>)<, post-marketing obligation if true>.
+          Cross-market: render authorizationsByAgency as "Other markets:" with one line per
+          entry: <agency> — <name> (<authorizationStatus>) — AMRC_...
+          fdaDetails / emaDetails: surface the agency-specific fields when present.
+          If "_referencesDrugCore" is present, list the active-ingredient DrugCore records.
 
     When multiple observations are present, render them in the order they were made. If a later
     observation drills into a result from an earlier one (e.g. get_trial on #1 of a prior
@@ -412,6 +559,132 @@ test TestRouteBudgetExhausted {
     history ""
     last_results "1. Pembrolizumab vs Chemo in NSCLC - Merck (PHASE3, RECRUITING) - AMTC_example001"
     scratch "[1] search_trials(query='lung cancer', limit=10, phase=PHASE3, overall_status=RECRUITING, intervention_type=DRUG)\n  -> 1 trial(s):\n    1. Pembrolizumab vs Chemo in NSCLC - Merck (PHASE3, RECRUITING) - AMTC_example001\n\nuser: You have used your tool budget. Answer now using only the information above. Do not request another tool."
+  }
+}
+
+test TestRouteSearchDrugsModalityStage {
+  functions [RouteQuery]
+  args {
+    user_query "What approved antibody drugs target checkpoint inhibition?"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteGetDrugWithRefs {
+  functions [RouteQuery]
+  args {
+    user_query "What trials and FDA/EMA approvals are tied to #1?"
+    history "user: Find approved checkpoint inhibitor antibodies\nassistant: (lists 3 drugs)"
+    last_results "1. Pembrolizumab — ANTIBODY, APPROVAL — AMDC_example001\n2. Nivolumab — ANTIBODY, APPROVAL — AMDC_example002\n3. Atezolizumab — ANTIBODY, APPROVAL — AMDC_example003"
+    scratch ""
+  }
+}
+
+test TestRouteLookupDrugChembl {
+  functions [RouteQuery]
+  args {
+    user_query "Look up CHEMBL1201583"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchRegulatoryCompareMarkets {
+  functions [RouteQuery]
+  args {
+    user_query "Is pembrolizumab approved in both the US and the EU?"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchRegulatoryDesignation {
+  functions [RouteQuery]
+  args {
+    user_query "Which oncology drugs reached the market on a breakthrough therapy designation?"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchRegulatoryOrphan {
+  functions [RouteQuery]
+  args {
+    user_query "Show me the active EU orphan drugs authorized since 2020"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteSearchRegulatoryDocFullText {
+  functions [RouteQuery]
+  args {
+    user_query "Which approved drugs mention immune-mediated hepatitis in their label?"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteLookupRegulatoryFda {
+  functions [RouteQuery]
+  args {
+    user_query "Resolve FDA application BLA125514"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteGetRegulatory {
+  functions [RouteQuery]
+  args {
+    user_query "Tell me more about #1, including the FDA-specific details"
+    history "user: Is pembrolizumab approved in the US and EU?\nassistant: (lists FDA + EMA authorizations)"
+    last_results "1. Keytruda — FDA · ACTIVE — AMRC_example001\n2. Keytruda — EMA · ACTIVE — AMRC_example002"
+    scratch ""
+  }
+}
+
+test TestSummarizeSearchDrugs {
+  functions [SummarizeResult]
+  args {
+    user_query "What approved antibody drugs target checkpoint inhibition?"
+    history ""
+    observations_json "[{\"tool\":\"search_drugs\",\"call\":\"search_drugs(query='checkpoint inhibitor', drug_type=ANTIBODY, max_clinical_stage=APPROVAL)\",\"result\":[{\"amassId\":\"AMDC_ex001\",\"chemblId\":\"CHEMBL3137343\",\"name\":\"Pembrolizumab\",\"description\":\"Anti-PD-1 monoclonal antibody approved for multiple oncology indications.\",\"synonyms\":[\"MK-3475\",\"lambrolizumab\"],\"tradeNames\":[\"Keytruda\"],\"drugType\":\"ANTIBODY\",\"maxClinicalStage\":\"APPROVAL\"},{\"amassId\":\"AMDC_ex002\",\"chemblId\":\"CHEMBL3707227\",\"name\":\"Nivolumab\",\"description\":\"Anti-PD-1 monoclonal antibody.\",\"synonyms\":[\"BMS-936558\"],\"tradeNames\":[\"Opdivo\"],\"drugType\":\"ANTIBODY\",\"maxClinicalStage\":\"APPROVAL\"}]}]"
+  }
+}
+
+test TestSummarizeGetDrugWithRefs {
+  functions [SummarizeResult]
+  args {
+    user_query "What trials and approvals are tied to pembrolizumab?"
+    history ""
+    observations_json "[{\"tool\":\"get_drug\",\"call\":\"get_drug(amass_id='AMDC_ex001', include_references_trialcore=True, include_references_regulatorycore=True)\",\"result\":{\"amassId\":\"AMDC_ex001\",\"chemblId\":\"CHEMBL3137343\",\"name\":\"Pembrolizumab\",\"description\":\"Anti-PD-1 monoclonal antibody.\",\"tradeNames\":[\"Keytruda\"],\"drugType\":\"ANTIBODY\",\"maxClinicalStage\":\"APPROVAL\",\"_referencesTrialCore\":[{\"amassId\":\"AMTC_ex001\",\"nctId\":\"NCT02142738\",\"briefTitle\":\"Pembrolizumab vs Chemo in NSCLC\",\"sponsorName\":\"Merck\",\"phase\":\"PHASE3\",\"overallStatus\":\"COMPLETED\"}],\"_referencesRegulatoryCore\":[{\"amassId\":\"AMRC_ex001\",\"agency\":\"FDA\",\"name\":\"Keytruda\",\"authorizationStatus\":\"ACTIVE\"}]}}]"
+  }
+}
+
+test TestSummarizeSearchRegulatoryCompareMarkets {
+  functions [SummarizeResult]
+  args {
+    user_query "Is pembrolizumab approved in both the US and the EU?"
+    history ""
+    observations_json "[{\"tool\":\"search_regulatory\",\"call\":\"search_regulatory(query='pembrolizumab')\",\"result\":[{\"amassId\":\"AMRC_ex001\",\"agency\":\"FDA\",\"name\":\"Keytruda\",\"activeSubstance\":\"pembrolizumab\",\"moleculeType\":\"ANTIBODY\",\"authorizationStatus\":\"ACTIVE\",\"marketingAuthorisationHolder\":\"Merck Sharp & Dohme\",\"authorizationDate\":\"2014-09-04\",\"authorizationsByAgency\":[{\"amassId\":\"AMRC_ex002\",\"agency\":\"EMA\",\"name\":\"Keytruda\",\"authorizationStatus\":\"ACTIVE\"}],\"documentSections\":[]}]}]"
+  }
+}
+
+test TestSummarizeGetRegulatory {
+  functions [SummarizeResult]
+  args {
+    user_query "Tell me more about the FDA authorization for Keytruda"
+    history ""
+    observations_json "[{\"tool\":\"get_regulatory\",\"call\":\"get_regulatory(amass_id='AMRC_ex001', include_fda_details=True)\",\"result\":{\"amassId\":\"AMRC_ex001\",\"agency\":\"FDA\",\"name\":\"Keytruda\",\"activeSubstance\":\"pembrolizumab\",\"moleculeType\":\"ANTIBODY\",\"authorizationStatus\":\"ACTIVE\",\"procedureType\":\"BLA\",\"therapeuticIndication\":\"Multiple oncology indications including melanoma and NSCLC.\",\"marketingAuthorisationHolder\":\"Merck Sharp & Dohme\",\"authorizationDate\":\"2014-09-04\",\"firstAuthorizationDate\":\"2014-09-04\",\"isOrphan\":false,\"sourceUrl\":\"https://www.accessdata.fda.gov/\",\"designations\":[{\"axis\":\"REVIEW_ACCELERATION\",\"type\":\"BREAKTHROUGH_THERAPY\",\"agency\":\"FDA\",\"nativeName\":\"Breakthrough Therapy\",\"postMarketingObligation\":false},{\"axis\":\"EARLY_ACCESS_BASIS\",\"type\":\"ACCELERATED_APPROVAL\",\"agency\":\"FDA\",\"nativeName\":\"Accelerated Approval\",\"basis\":\"SURROGATE_ENDPOINT\",\"postMarketingObligation\":true}],\"authorizationsByAgency\":[{\"amassId\":\"AMRC_ex002\",\"agency\":\"EMA\",\"name\":\"Keytruda\",\"authorizationStatus\":\"ACTIVE\"}],\"fdaDetails\":{\"applicationNumber\":\"BLA125514\",\"prescriptionClass\":\"Prescription\",\"labelUrl\":\"https://www.accessdata.fda.gov/label.pdf\",\"ndc\":[\"0006-3026\"]}}}]"
   }
 }
 
