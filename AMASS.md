@@ -18,7 +18,7 @@ OpenAPI spec:   https://api.amass.tech/api/doc/openapi.json
 
 1. **Responses are wrapped in `{"data": ...}`.** Always read from the `data` key, not the top-level object. Errors use a different shape: `{"error": {...}}`.
 2. **Every request needs auth.** No anonymous access. Omitting `Authorization` -> 401.
-3. **Amass IDs are canonical.** The get-by-ID endpoints take Amass IDs only (`AMBC_...`, `AMTC_...`). If you have PMIDs/DOIs/NCTs, convert them via the lookup endpoints first.
+3. **Amass IDs are canonical.** The get-by-ID endpoints take Amass IDs only (`AMBC_...`, `AMTC_...`, `AMDC_...`, `AMRC_...`). If you have PMIDs/DOIs/NCTs/ChEMBL IDs or FDA/EMA identifiers, convert them via the lookup endpoints first.
 4. **Batch lookup items can fail independently.** Always check each item for `error` before reading `amassIds`. Each item takes exactly one identifier (e.g. `pmid` or `doi`, not both).
 5. **Don't request `fulltext` unless you need it.** It massively increases response size. Use the `include` param only when required.
 6. **Rate limits are per user+org, not per key.** Multiple keys for the same user share the same quota. On 429, read `Retry-After` and back off exponentially.
@@ -33,7 +33,8 @@ Cores are domain-specific datasets. Each Core lives under `/v1/cores/{coreName}/
 | --- | --- | --- |
 | **BiomedCore** | `/v1/cores/biomedcore/` | Available |
 | **TrialCore** | `/v1/cores/trialcore/` | Available |
-| **RegulatoryCore** | `/v1/cores/regulatorycore/` | Coming soon |
+| **DrugCore** | `/v1/cores/drugcore/` | Available |
+| **RegulatoryCore** | `/v1/cores/regulatorycore/` | Available |
 
 ---
 
@@ -49,12 +50,18 @@ GET /v1/cores/biomedcore/records?query={text}
 | --- | --- | --- | --- |
 | `query` | yes | string | Search across titles, abstracts, fulltext, metadata |
 | `limit` | no | int | 1–300, default 20 |
-| `include` | no | string | Repeat for multiple: `include=fulltext&include=authorsMetadata` |
+| `include` | no | string | One or more of: `fulltext`, `authorsMetadata`, `meshIds`, `substanceIds`, `referencesTrialCore`, `references`, `citedBy`. Repeat for multiple: `include=fulltext&include=authorsMetadata` |
 | `minPublicationDate` | no | ISO date | e.g. `2023-01-01` |
 | `maxPublicationDate` | no | ISO date | e.g. `2026-01-01` |
 | `minCitationCount` | no | int | 0–100000 |
 | `minJournalQualityJufo` | no | enum | `0`, `1`, `2`, or `3` (3 = top-tier) |
 | `isRetracted` | no | bool | `true` or `false` |
+| `authorOrcids` | no | string | Repeat for multiple. OR within param. Bare (`0000-...`) or URL form. |
+| `authorNames` | no | string | Repeat for multiple. OR within param. Free-text token (PubMed indexes as `LastName Initials`). |
+| `institutionRors` | no | string | Repeat for multiple. OR within param. Bare (`03vek6s52`) or URL form. |
+| `institutionNames` | no | string | Repeat for multiple. OR within param. Free-text token. |
+
+Author/institution filters: **OR within one filter, AND across filters.** `?authorNames=Hassabis&institutionNames=DeepMind` means *(any Hassabis author) AND (any DeepMind affiliation)* — they don't have to be the same author. Pair with `include=authorsMetadata` to verify the match.
 
 ```bash
 curl "https://api.amass.tech/api/v1/cores/biomedcore/records?query=CRISPR&limit=5&minJournalQualityJufo=2" \
@@ -160,7 +167,7 @@ GET /v1/cores/trialcore/records?query={text}
 | --- | --- | --- | --- |
 | `query` | yes | string | Search text |
 | `limit` | no | int | 1–300, default 20 |
-| `include` | no | string | `outcomes`, `detailedDescription` |
+| `include` | no | string | One or more of: `detailedDescription`, `outcomes`, `referencesBiomedCore`. Repeat for multiple: `include=outcomes&include=referencesBiomedCore` |
 | `phase` | no | enum | `EARLY_PHASE1`, `PHASE1`, `PHASE1/PHASE2`, `PHASE2`, `PHASE2/PHASE3`, `PHASE3`, `PHASE4`, `NA` |
 | `overallStatus` | no | enum | `RECRUITING`, `NOT_YET_RECRUITING`, `ENROLLING_BY_INVITATION`, `ACTIVE_NOT_RECRUITING`, `SUSPENDED`, `TERMINATED`, `COMPLETED`, `WITHDRAWN`, `UNKNOWN`, `WITHHELD`, `AVAILABLE`, `NO_LONGER_AVAILABLE`, `TEMPORARILY_NOT_AVAILABLE`, `APPROVED_FOR_MARKETING` |
 | `studyType` | no | enum | `INTERVENTIONAL`, `OBSERVATIONAL`, `EXPANDED_ACCESS` |
@@ -253,7 +260,166 @@ oversightHasDmc           boolean|null
 
 ---
 
+## DrugCore Endpoints
+
+### 1. Search
+
+```
+GET /v1/cores/drugcore/records?query={text}
+```
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `query` | yes | string | Search across drug names, trade names, synonyms, descriptions |
+| `limit` | no | int | 1–300, default 20 |
+| `include` | no | string | One or more of: `parent`, `children`, `referencesTrialCore`, `referencesBiomedCore`. Repeat for multiple: `include=parent&include=children` |
+| `drugType` | no | enum | `SMALL_MOLECULE`, `ANTIBODY`, `PROTEIN`, `OLIGONUCLEOTIDE`, `GENE`, `ENZYME`, `ANTIBODY_DRUG_CONJUGATE`, `VACCINE_COMPONENT`, `CELL`, `OLIGOSACCHARIDE`, `VACCINE`, `UNKNOWN` |
+| `maxClinicalStage` | no | enum | `PRECLINICAL`, `IND`, `EARLY_PHASE1`, `PHASE1`, `PHASE1/PHASE2`, `PHASE2`, `PHASE2/PHASE3`, `PHASE3`, `PREAPPROVAL`, `APPROVAL`, `UNKNOWN` |
+
+```bash
+curl "https://api.amass.tech/api/v1/cores/drugcore/records?query=pembrolizumab&drugType=ANTIBODY&limit=5" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+```
+
+### 2. Get by Amass ID
+
+```
+GET /v1/cores/drugcore/records/{amassId}
+```
+
+Returns 404 if not found, 400 if the Amass ID is malformed.
+
+### 3. Batch Lookup (ChEMBL ID -> Amass ID)
+
+```
+POST /v1/cores/drugcore/records/lookup
+```
+
+Each item must have `chemblId`.
+
+```json
+{"items": [{"chemblId": "CHEMBL1201583"}, {"chemblId": "CHEMBL9999999"}]}
+```
+
+Returns `[{"amassIds": ["AMDC_..."]}, {"error": "..."}]` — one entry per input item. A single ChEMBL ID can resolve to multiple Amass IDs, so `amassIds` is always an array.
+
+---
+
+## DrugCore Record Schema
+
+**Default fields:**
+
+```
+amassId           string       AMDC_... (canonical ID)
+chemblId          string|null  ChEMBL molecule ID
+name              string|null  Primary drug name
+description       string|null  A short free-text description of the drug, its clinical stage, and/or its indications
+synonyms          string[]     Alternative names
+tradeNames        string[]     Brand / trade names
+drugType          string|null  e.g. SMALL_MOLECULE, ANTIBODY
+maxClinicalStage  string|null  Highest stage reached, e.g. PHASE3, APPROVAL
+inchiKey          string|null  InChIKey structure hash
+canonicalSmiles   string|null  Canonical SMILES string
+```
+
+**Optional fields (`include` param):** `parent`, `children`, `referencesTrialCore`, `referencesBiomedCore`
+
+Reference fields:
+
+- `parent`, `children` — **intra-core links within DrugCore.** `parent` is a single `AMDC_...` ID; `children` is an array of `AMDC_...` IDs (drug hierarchy).
+- `referencesTrialCore` — **cross-core link to TrialCore.** Array of `AMTC_...` IDs for associated clinical trials.
+- `referencesBiomedCore` — **cross-core link to BiomedCore.** Array of `AMBC_...` IDs for associated publications.
+
+---
+
+## RegulatoryCore Endpoints
+
+Cross-agency drug regulatory authorizations from the FDA (US) and EMA (EU), normalized onto a shared schema. One record = one authorization. Updated weekly.
+
+### 1. Search
+
+```
+GET /v1/cores/regulatorycore/records?query={text}
+```
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `query` | yes | string | Product name, active substance, indication, or holder |
+| `limit` | no | int | 1–300, default 20 |
+| `include` | no | string | One or more of: `emaDetails`, `fdaDetails`, `referencesDrugCore`. Repeat for multiple. |
+| `agency` | no | enum | `FDA`, `EMA`. Repeat for multiple (OR). |
+| `moleculeType` | no | enum | `SMALL_MOLECULE`, `ANTIBODY`, `PROTEIN`, `ENZYME`, `OLIGONUCLEOTIDE`, `GENE`, `CELL`, `ANTIBODY_DRUG_CONJUGATE`, `VACCINE_COMPONENT`, `VACCINE`, `OLIGOSACCHARIDE`, `UNKNOWN`. Repeat for multiple (OR). |
+| `authorizationStatus` | no | enum | `ACTIVE`, `APPROVED_NOT_MARKETED`, `CONDITIONAL`, `SUSPENDED`, `WITHDRAWN_VOLUNTARY`, `WITHDRAWN_FORCED`, `REVOKED`, `LAPSED_SUNSET`, `REFUSED`, `WITHDRAWN_DURING_REVIEW`, `EXPIRED`, `UNKNOWN`. Repeat for multiple (OR). Case-insensitive on input. |
+| `hasDesignation` | no | enum | `PRIORITY_REVIEW`, `BREAKTHROUGH_THERAPY`, `FAST_TRACK`, `RMAT`, `ACCELERATED_APPROVAL`, `ACCELERATED_ASSESSMENT`, `PRIME`, `CONDITIONAL_MA`, `EXCEPTIONAL_CIRCUMSTANCES`. Repeat for multiple (OR). Each applies only to the agency that owns it. |
+| `isOrphan` | no | bool | `true`/`false`. Cross-walk: FDA Orphan Drug / EMA Orphan Medicine. |
+| `minAuthorizationDate` | no | ISO date | e.g. `2020-01-01` |
+| `maxAuthorizationDate` | no | ISO date | e.g. `2026-01-01` |
+
+Enum filters combine **OR within one filter, AND across filters**.
+
+```bash
+curl "https://api.amass.tech/api/v1/cores/regulatorycore/records?query=pembrolizumab&agency=FDA&agency=EMA&limit=10" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+```
+
+### 2. Get by Amass ID
+
+```
+GET /v1/cores/regulatorycore/records/{amassId}
+```
+
+Returns 404 if not found.
+
+### 3. Batch Lookup (FDA/EMA identifier -> Amass ID)
+
+```
+POST /v1/cores/regulatorycore/records/lookup
+```
+
+Each item must have **exactly one** of `fdaApplicationNumber`, `emaProductNumber`, `ndc`, or `splSetId`.
+
+```json
+{"items": [{"fdaApplicationNumber": "BLA125514"}, {"emaProductNumber": "EMEA/H/C/003820"}, {"ndc": "0169-4404"}, {"splSetId": "ee06186f-2aa3-4990-a760-757579d8f77b"}]}
+```
+
+Returns one entry per input item — `amassIds` (always an array; one identifier can resolve to multiple) or `error`.
+
+---
+
+## RegulatoryCore Record Schema
+
+**Default fields:**
+
+```
+amassId                       string       AMRC_... (canonical ID)
+agency                        string       FDA or EMA
+name                          string|null  Primary product / brand name
+activeSubstance               string|null
+moleculeType                  string|null  Projected from DrugCore
+authorizationStatus           string|null  Unified FDA + EMA status
+procedureType                 string|null  FDA: NDA/BLA/ANDA; EMA: CENTRALISED_HUMAN, etc.
+therapeuticIndication         string|null
+marketingAuthorisationHolder  string|null
+authorizationDate             string|null  ISO date
+firstAuthorizationDate        string|null  ISO date
+lastUpdateDate                string|null  ISO date
+sourceUrl                     string|null
+isOrphan                      boolean|null
+designations                  object[]     {axis, type, agency, nativeName, basis, indication, postMarketingObligation}
+authorizationsByAgency        object[]     Cross-market link, always populated: {amassId, agency, name, authorizationStatus}
+```
+
+**Optional fields (`include` param):** `fdaDetails`, `emaDetails`, `referencesDrugCore`
+
+Reference fields:
+
+- `authorizationsByAgency` — **cross-market link within RegulatoryCore.** Array of `AMRC_...` IDs for the same product's other-market authorizations (self excluded), each carrying its own `authorizationStatus`. Always present — cannot be requested or suppressed.
+- `referencesDrugCore` — **cross-core link to DrugCore.** Array of `AMDC_...` IDs for the product's active ingredients.
+
+---
+
 ## Common Patterns
+
 
 **Find recent high-impact papers on a topic:**
 
@@ -290,6 +456,39 @@ curl "https://api.amass.tech/api/v1/cores/trialcore/records\
   -H "Authorization: Bearer amass_YOUR_KEY"
 ```
 
+**Find approved drugs of a given modality:**
+
+```bash
+curl "https://api.amass.tech/api/v1/cores/drugcore/records\
+?query=checkpoint+inhibitor\
+&drugType=ANTIBODY\
+&maxClinicalStage=APPROVAL\
+&limit=20" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+```
+
+**Compare a drug's US vs EU authorization status:**
+
+```bash
+curl "https://api.amass.tech/api/v1/cores/regulatorycore/records\
+?query=pembrolizumab\
+&limit=50" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+# Read authorizationsByAgency on each record for the cross-market status.
+```
+
+**Find expedited-pathway approvals across both agencies:**
+
+```bash
+curl "https://api.amass.tech/api/v1/cores/regulatorycore/records\
+?query=oncology\
+&hasDesignation=BREAKTHROUGH_THERAPY\
+&hasDesignation=ACCELERATED_APPROVAL\
+&hasDesignation=PRIME\
+&limit=100" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+```
+
 **Convert PMIDs to Amass IDs, then fetch full records:**
 
 ```bash
@@ -304,6 +503,7 @@ curl "https://api.amass.tech/api/v1/cores/biomedcore/records/{amassId}\
 ?include=authorsMetadata" \
   -H "Authorization: Bearer amass_YOUR_KEY"
 ```
+
 
 **Convert NCT IDs to Amass IDs, then fetch trial details:**
 
@@ -334,7 +534,22 @@ curl "https://api.amass.tech/api/v1/cores/biomedcore/records/{biomedCoreAmassId}
   -H "Authorization: Bearer amass_YOUR_KEY"
 ```
 
-For full walkthroughs of these patterns with real response data, see [API Workflows](use-cases).
+**Resolve FDA/EMA identifiers to Amass IDs, then fetch authorizations:**
+
+```bash
+# Step 1: lookup (each item carries exactly one identifier)
+curl -X POST "https://api.amass.tech/api/v1/cores/regulatorycore/records/lookup" \
+  -H "Authorization: Bearer amass_YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"items": [{"fdaApplicationNumber": "BLA125514"}, {"ndc": "0169-4404"}, {"splSetId": "ee06186f-2aa3-4990-a760-757579d8f77b"}]}'
+
+# Step 2: fetch details with the agency-specific block
+curl "https://api.amass.tech/api/v1/cores/regulatorycore/records/{amassId}\
+?include=fdaDetails" \
+  -H "Authorization: Bearer amass_YOUR_KEY"
+```
+
+For full walkthroughs of these patterns with real response data, see [API Workflows](examples/use-cases).
 
 ---
 
