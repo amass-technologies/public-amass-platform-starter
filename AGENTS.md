@@ -6,7 +6,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 Python 3.13+ demo agent built around [BAML](https://docs.boundaryml.com) for type-safe LLM function calls. Managed with `uv`. `BAML.md` is a full BAML language reference kept in-repo — consult it before writing `.baml` code.
 
-The amass platform API reference is found in `AMASS.md`. The agent covers all four cores — `biomedcore`, `trialcore`, `drugcore`, and `regulatorycore` — each with search / get / lookup tools, and can be extended to other API endpoints by adding new BAML functions.
+The amass platform API reference is found in `AMASS.md`. The agent covers all five cores — `biomedcore`, `trialcore`, `drugcore`, `regulatorycore`, and `genecore` — each with search / get / lookup tools, and can be extended to other API endpoints by adding new BAML functions.
 
 ## Commands
 
@@ -25,8 +25,8 @@ The runtime split is BAML-source → generated-client → Python caller:
 
 - **`baml_src/*.baml`** — hand-written source of truth. `clients.baml` declares LLM clients. `generators.baml` targets `python/pydantic` with `default_client_mode async`, so generated functions are `async` by default. Feature files like `agent.baml` define `class` data models, `function` LLM calls, and inline `test` blocks.
 - **`baml_client/`** — generated, do not edit. Import as `from baml_client import b` for functions and `from baml_client.types import ...` for Pydantic models. Because the default mode is async, call sites need `await b.FunctionName(...)`.
-- **`src/main.py`** — REPL entry point. Runs a router loop per user turn: `RouteQuery` picks one tool (search/get/lookup for papers, trials, drugs, or regulatory authorizations) or emits `FinalAnswer`; `SummarizeResult` synthesizes at end-of-turn. Maintains `history`, `last_results`, and per-turn `observations`. Run with `uv run python -m src.main` from the repo root so `baml_client/` stays importable.
-- **`src/amass.py`** — async HTTP client for the amass platform API, wrapping `biomedcore`, `trialcore`, `drugcore`, and `regulatorycore`.
+- **`src/main.py`** — REPL entry point. Runs a router loop per user turn: `RouteQuery` picks one tool (search/get/lookup for papers, trials, drugs, regulatory authorizations, or genes) or emits `FinalAnswer`; `SummarizeResult` synthesizes at end-of-turn. Maintains `history`, `last_results`, and per-turn `observations`. Run with `uv run python -m src.main` from the repo root so `baml_client/` stays importable.
+- **`src/amass.py`** — async HTTP client for the amass platform API, wrapping `biomedcore`, `trialcore`, `drugcore`, `regulatorycore`, and `genecore`.
 
 When adding an LLM capability: define the class + function in a new or existing `baml_src/*.baml` file, add a `test` block, run `baml-cli generate`, then `await b.NewFunction(...)` from Python.
 

@@ -1,7 +1,7 @@
 """Interactive BAML-driven agent over the amass platform.
 
 Cores: BioMedCore (papers) · TrialCore (trials) · DrugCore (drugs/molecules) ·
-RegulatoryCore (FDA + EMA authorizations).
+RegulatoryCore (FDA + EMA authorizations) · GeneCore (genes + target intelligence).
 
 Usage:
     uv run python -m src.main                        # drop into REPL
@@ -18,6 +18,8 @@ Supported question types:
     8. Drug evidence base:       "What trials and approvals are tied to drug #1?"
     9. Regulatory comparison:    "Is pembrolizumab approved in both the US and the EU?"
    10. Regulatory doc full-text: "Which drugs mention immune-mediated hepatitis in their label?"
+   11. Gene / target search:     "Which essential kinases are heavily constrained against loss-of-function?"
+   12. Gene → drug cross-core:   "What drugs target the EGFR gene?"
 """
 
 from __future__ import annotations
@@ -40,14 +42,17 @@ from baml_client import b
 from baml_client.types import (
     FinalAnswer,
     GetDrug,
+    GetGene,
     GetPaper,
     GetRegulatory,
     GetTrial,
     LookupDrug,
+    LookupGene,
     LookupPaper,
     LookupRegulatory,
     LookupTrial,
     SearchDrugs,
+    SearchGenes,
     SearchPapers,
     SearchRegulatory,
     SearchTrials,
@@ -67,6 +72,9 @@ ToolRequest = (
     | SearchRegulatory
     | GetRegulatory
     | LookupRegulatory
+    | SearchGenes
+    | GetGene
+    | LookupGene
 )
 
 # Max tool calls per user turn. If the router hasn't produced a FinalAnswer by then, we inject
@@ -87,7 +95,7 @@ err_console = Console(stderr=True, highlight=False)
 AMASS_COLOR = "#f84016"
 
 
-_AMASS_ID_RE = re.compile(r"(AM[BTDR]C_[A-Za-z0-9]+)")
+_AMASS_ID_RE = re.compile(r"(AM[BTDRG]C_[A-Za-z0-9]+)")
 
 
 def _amass_id(aid: str) -> str:
@@ -96,6 +104,28 @@ def _amass_id(aid: str) -> str:
 
 def _highlight_amass_ids(text: str) -> str:
     return _AMASS_ID_RE.sub(rf"[{AMASS_COLOR}]\1[/{AMASS_COLOR}]", text)
+
+
+def _gene_intel_tags(rec: dict[str, Any]) -> str:
+    """Short dim tag string summarizing a gene's Open Targets intelligence (druggability,
+    essentiality, LOEUF). Returns '' when none is present; otherwise ' [dim]· a · b[/dim]'."""
+    tags: list[str] = []
+    tract = rec.get("tractability")
+    if isinstance(tract, dict):
+        for modality in ("smallMolecule", "antibody"):
+            lanes = tract.get(modality)
+            if isinstance(lanes, dict) and lanes.get("clinical"):
+                tags.append("druggable")
+                break
+    depmap = rec.get("depmapEssentiality")
+    if isinstance(depmap, dict) and depmap.get("isEssential"):
+        tags.append("essential")
+    gnomad = rec.get("gnomadConstraint")
+    if isinstance(gnomad, dict):
+        lof = gnomad.get("lossOfFunction")
+        if isinstance(lof, dict) and lof.get("loeuf") is not None:
+            tags.append(f"LOEUF {lof['loeuf']}")
+    return f" [dim]· {escape(' · '.join(tags))}[/dim]" if tags else ""
 
 EXAMPLE_QUERIES = [
     # 1. Topic search (BioMedCore) -> SearchPapers
@@ -120,6 +150,10 @@ EXAMPLE_QUERIES = [
     "Is pembrolizumab approved in both the US and the EU?",
     # 11. Regulatory full-text document search (RegulatoryCore) -> SearchRegulatory
     "Which approved drugs mention immune-mediated hepatitis in their label?",
+    # 12. Gene / target search with intelligence filters (GeneCore) -> SearchGenes
+    "Which essential kinases are heavily constrained against loss-of-function?",
+    # 13. Gene -> drug cross-core (GeneCore -> DrugCore)
+    "What drugs target the EGFR gene?",
 ]
 
 PAPER_SEARCH_FIELDS_KEEP = (
@@ -172,13 +206,26 @@ REGULATORY_GET_FIELDS_KEEP = (
     "designations", "authorizationsByAgency",
     "fdaDetails", "emaDetails", "referencesDrugCore",
 )
+GENE_SEARCH_FIELDS_KEEP = (
+    "amassId", "ensemblGeneId", "symbol", "name", "geneType",
+    "location", "synonyms", "summary",
+    "tractability", "targetClass", "gnomadConstraint", "depmapEssentiality",
+)
+GENE_GET_FIELDS_KEEP = (
+    "amassId", "ensemblGeneId", "symbol", "name", "synonyms", "geneType",
+    "summary", "location", "chromosome", "strand",
+    "entrezGeneId", "hgncId", "uniprotIds", "hgncGeneGroups",
+    "maneSelect", "omimId", "orphanet", "iuphar",
+    "tractability", "safetyLiabilities", "targetClass",
+    "gnomadConstraint", "depmapEssentiality", "protein",
+)
 MAX_CROSS_CORE_REFS = 5
 
 
 def print_banner() -> None:
     first = EXAMPLE_QUERIES[0]
     console.print()
-    console.print("[bold cyan]amass agent[/bold cyan] — ask about scientific papers and clinical trials.")
+    console.print("[bold cyan]amass agent[/bold cyan] — ask about papers, trials, drugs, regulatory authorizations, and genes.")
     console.print()
     console.print("[bold]Try one of these[/bold] [dim](type or paste directly):[/dim]")
     for i, q in enumerate(EXAMPLE_QUERIES, 1):
@@ -200,7 +247,12 @@ def render_digest(last_results: list[dict[str, Any]]) -> str:
     for i, rec in enumerate(last_results, 1):
         amass_id = rec.get("amassId") or "?"
         # Disambiguate by amassId prefix (then by shape) — each core has a distinct digest line.
-        if amass_id.startswith("AMDC_") or (rec.get("drugType") and not rec.get("agency")):
+        if amass_id.startswith("AMGC_") or (rec.get("symbol") and rec.get("geneType")):
+            symbol = rec.get("symbol") or "(unknown)"
+            name = rec.get("name") or "(unnamed)"
+            gtype = rec.get("geneType") or "?"
+            lines.append(f"{i}. {symbol} — {name} ({gtype}) — {amass_id}")
+        elif amass_id.startswith("AMDC_") or (rec.get("drugType") and not rec.get("agency")):
             name = rec.get("name") or "(unnamed)"
             dtype = rec.get("drugType") or "?"
             stage = rec.get("maxClinicalStage") or "?"
@@ -325,6 +377,135 @@ def _trim_doc_sections(sections: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _compact_tractability(tract: Any, *, clinical_only: bool) -> dict[str, Any] | None:
+    """Reduce GeneCore's Open Targets tractability to the satisfied buckets per modality.
+    For search we keep only the clinical-precedent lane; for get we keep both lanes."""
+    if not isinstance(tract, dict):
+        return None
+    out: dict[str, Any] = {}
+    for modality, lanes in tract.items():
+        if not isinstance(lanes, dict):
+            continue
+        keep: dict[str, Any] = {}
+        clinical = lanes.get("clinical")
+        if clinical:
+            keep["clinical"] = clinical
+        if not clinical_only:
+            predictive = lanes.get("predictive")
+            if predictive:
+                keep["predictive"] = predictive
+        if keep:
+            out[modality] = keep
+    return out or None
+
+
+def _compact_gnomad(gc: Any) -> dict[str, Any] | None:
+    """Keep the headline loss-of-function constraint metrics (LOEUF / pLI / decile)."""
+    if not isinstance(gc, dict):
+        return None
+    lof = gc.get("lossOfFunction")
+    if not isinstance(lof, dict):
+        return None
+    keep = {k: lof.get(k) for k in ("loeuf", "pli", "loeufDecile", "loeufRank") if k in lof}
+    return {"lossOfFunction": keep} if keep else None
+
+
+def _compact_depmap(dm: Any, *, top_n: int = 0) -> dict[str, Any] | None:
+    """Keep the essentiality summary and (optionally) the top dependent cell lines."""
+    if not isinstance(dm, dict):
+        return None
+    keep = {
+        k: dm.get(k)
+        for k in ("isEssential", "cellLinesTested", "dependentCellLines",
+                  "meanGeneEffect", "medianGeneEffect", "minGeneEffect")
+        if k in dm
+    }
+    if top_n and isinstance(dm.get("topDependencies"), list):
+        keep["topDependencies"] = [
+            {k: d.get(k) for k in ("cellLineName", "tissue", "disease", "geneEffect") if k in d}
+            for d in dm["topDependencies"][:top_n]
+            if isinstance(d, dict)
+        ]
+    return keep or None
+
+
+def _compact_protein(prot: Any) -> dict[str, Any] | None:
+    """Keep the UniProt identity / function / structure essentials for a gene's protein."""
+    if not isinstance(prot, dict):
+        return None
+    out: dict[str, Any] = {}
+    fn = prot.get("function")
+    if isinstance(fn, dict):
+        out["function"] = {
+            k: fn.get(k)
+            for k in ("functionSummary", "subcellularLocations", "keywords")
+            if k in fn
+        }
+    struct = prot.get("structure")
+    if isinstance(struct, dict):
+        keep = {k: struct.get(k) for k in ("has3dStructure",) if k in struct}
+        pdb = struct.get("pdbIds")
+        if isinstance(pdb, list):
+            keep["pdbIds"] = pdb[:5]
+            keep["pdbCount"] = len(pdb)
+        out["structure"] = keep
+    return out or None
+
+
+def _apply_target_intel(trimmed: dict[str, Any], rec: dict[str, Any], *, detailed: bool) -> None:
+    """Compact the (heavy) Open Targets target-intelligence objects in place, dropping keys
+    that resolve to None so absent data simply doesn't appear."""
+    tract = _compact_tractability(rec.get("tractability"), clinical_only=not detailed)
+    gnomad = _compact_gnomad(rec.get("gnomadConstraint"))
+    depmap = _compact_depmap(rec.get("depmapEssentiality"), top_n=3 if detailed else 0)
+    target_class = rec.get("targetClass") if isinstance(rec.get("targetClass"), dict) else None
+    for key, value in (
+        ("tractability", tract),
+        ("gnomadConstraint", gnomad),
+        ("depmapEssentiality", depmap),
+        ("targetClass", target_class),
+    ):
+        if value is not None:
+            trimmed[key] = value
+        else:
+            trimmed.pop(key, None)
+    if detailed:
+        liabilities = rec.get("safetyLiabilities")
+        if isinstance(liabilities, list) and liabilities:
+            trimmed["safetyLiabilities"] = [
+                {k: s.get(k) for k in ("event", "datasource") if k in s}
+                for s in liabilities[:6]
+                if isinstance(s, dict)
+            ]
+        else:
+            trimmed.pop("safetyLiabilities", None)
+        protein = _compact_protein(rec.get("protein"))
+        if protein is not None:
+            trimmed["protein"] = protein
+        else:
+            trimmed.pop("protein", None)
+
+
+def trim_gene_search_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in GENE_SEARCH_FIELDS_KEEP if k in rec}
+    summary = trimmed.get("summary")
+    if isinstance(summary, str) and len(summary) > 400:
+        trimmed["summary"] = summary[:400] + " …[truncated]"
+    _apply_target_intel(trimmed, rec, detailed=False)
+    return trimmed
+
+
+def trim_gene_record(rec: dict[str, Any]) -> dict[str, Any]:
+    trimmed = {k: rec.get(k) for k in GENE_GET_FIELDS_KEEP if k in rec}
+    summary = trimmed.get("summary")
+    if isinstance(summary, str) and len(summary) > 1200:
+        trimmed["summary"] = summary[:1200] + " …[truncated]"
+    _apply_target_intel(trimmed, rec, detailed=True)
+    if "_referencesDrugCore" in rec:
+        trimmed["_referencesDrugCore"] = rec["_referencesDrugCore"]
+    return trimmed
+
+
 async def _fetch_drug_with_refs(
     amass: AmassClient,
     amass_id: str,
@@ -447,6 +628,34 @@ async def _fetch_paper_with_refs(
         raw["_references"] = [
             trim_trial_search_record(r) for r in refs if isinstance(r, dict)
         ]
+    return raw
+
+
+async def _fetch_gene_with_refs(
+    amass: AmassClient,
+    amass_id: str,
+    *,
+    include_protein: bool = False,
+    include_references_drugcore: bool = False,
+) -> dict[str, Any] | None:
+    raw = await amass.get_gene(
+        amass_id,
+        include_protein=include_protein,
+        include_references_drugcore=include_references_drugcore,
+    )
+    if raw is None:
+        return None
+    # Cross-core enrichment: parallel-fetch a few DrugCore records the gene is targeted by.
+    if include_references_drugcore:
+        ids = (raw.get("referencesDrugCore") or [])[:MAX_CROSS_CORE_REFS]
+        if ids:
+            refs = await asyncio.gather(
+                *(amass.get_drug(rid) for rid in ids),
+                return_exceptions=True,
+            )
+            raw["_referencesDrugCore"] = [
+                trim_drug_search_record(r) for r in refs if isinstance(r, dict)
+            ]
     return raw
 
 
@@ -641,6 +850,64 @@ async def dispatch(
         if raw is None:
             return "get_regulatory", {"error": f"resolved {ident} → {amass_id} but fetch returned 404"}
         return "get_regulatory", trim_regulatory_record(raw)
+    if isinstance(req, SearchGenes):
+        raw = await amass.search_genes(
+            query=req.query,
+            limit=req.limit or 20,
+            gene_type=req.gene_type,
+            target_class=req.target_class,
+            tractability_modality=req.tractability_modality,
+            tractability_stage=req.tractability_stage,
+            is_druggable=req.is_druggable,
+            is_essential=req.is_essential,
+            has_safety_liabilities=req.has_safety_liabilities,
+            max_constraint_loeuf=req.max_constraint_loeuf,
+        )
+        return "search_genes", [trim_gene_search_record(r) for r in raw]
+    if isinstance(req, GetGene):
+        raw = await _fetch_gene_with_refs(
+            amass,
+            req.amass_id,
+            include_protein=bool(req.include_protein),
+            include_references_drugcore=bool(req.include_references_drugcore),
+        )
+        if raw is None:
+            return "get_gene", {"error": f"no gene found for {req.amass_id}"}
+        return "get_gene", trim_gene_record(raw)
+    if isinstance(req, LookupGene):
+        # Exactly one identifier, per AMASS.md. Prefer in a stable order if several are set.
+        id_map = (
+            ("ensemblGeneId", req.ensembl_gene_id, "Ensembl"),
+            ("hgncId", req.hgnc_id, "HGNC"),
+            ("entrezGeneId", req.entrez_gene_id, "Entrez"),
+            ("uniprotId", req.uniprot_id, "UniProt"),
+            ("symbol", req.symbol, "symbol"),
+            ("omimId", req.omim_id, "OMIM"),
+            ("orphanet", req.orphanet, "Orphanet"),
+            ("iuphar", req.iuphar, "IUPHAR"),
+        )
+        item: dict[str, str] | None = None
+        ident = ""
+        for key, value, label in id_map:
+            if value:
+                item = {key: value}
+                ident = f"{label} {value}"
+                break
+        if item is None:
+            return "get_gene", {
+                "error": "lookup_gene requires one of ensembl_gene_id, hgnc_id, "
+                "entrez_gene_id, uniprot_id, symbol, omim_id, orphanet, or iuphar"
+            }
+        results = await amass.lookup_genes([item])
+        amass_id, err = _extract_lookup_amass_id(results)
+        if err:
+            return "get_gene", {"error": f"lookup failed for {ident}: {err}"}
+        if not amass_id:
+            return "get_gene", {"error": f"no GeneCore record found for {ident}"}
+        raw = await amass.get_gene(amass_id)
+        if raw is None:
+            return "get_gene", {"error": f"resolved {ident} → {amass_id} but fetch returned 404"}
+        return "get_gene", trim_gene_record(raw)
     raise TypeError(f"Unknown tool request: {type(req).__name__}")
 
 
@@ -731,14 +998,50 @@ def _format_call(req: ToolRequest) -> str:
         if req.include_references_drugcore:
             bits.append("include_references_drugcore=True")
         return "get_regulatory(" + ", ".join(bits) + ")"
-    # LookupRegulatory
+    if isinstance(req, LookupRegulatory):
+        ident = (
+            f"fda_application_number={req.fda_application_number!r}" if req.fda_application_number
+            else f"ema_product_number={req.ema_product_number!r}" if req.ema_product_number
+            else f"ndc={req.ndc!r}" if req.ndc
+            else f"spl_set_id={req.spl_set_id!r}"
+        )
+        return f"lookup_regulatory({ident})"
+    if isinstance(req, SearchGenes):
+        bits = [f"query={req.query!r}", f"limit={req.limit or 20}"]
+        for name in (
+            "gene_type", "target_class", "tractability_modality", "tractability_stage",
+        ):
+            v = getattr(req, name)
+            if v:
+                bits.append(f"{name}={v}")
+        if req.is_druggable is not None:
+            bits.append(f"is_druggable={req.is_druggable}")
+        if req.is_essential is not None:
+            bits.append(f"is_essential={req.is_essential}")
+        if req.has_safety_liabilities is not None:
+            bits.append(f"has_safety_liabilities={req.has_safety_liabilities}")
+        if req.max_constraint_loeuf is not None:
+            bits.append(f"max_constraint_loeuf={req.max_constraint_loeuf}")
+        return "search_genes(" + ", ".join(bits) + ")"
+    if isinstance(req, GetGene):
+        bits = [f"amass_id={req.amass_id!r}"]
+        if req.include_protein:
+            bits.append("include_protein=True")
+        if req.include_references_drugcore:
+            bits.append("include_references_drugcore=True")
+        return "get_gene(" + ", ".join(bits) + ")"
+    # LookupGene
     ident = (
-        f"fda_application_number={req.fda_application_number!r}" if req.fda_application_number
-        else f"ema_product_number={req.ema_product_number!r}" if req.ema_product_number
-        else f"ndc={req.ndc!r}" if req.ndc
-        else f"spl_set_id={req.spl_set_id!r}"
+        f"ensembl_gene_id={req.ensembl_gene_id!r}" if req.ensembl_gene_id
+        else f"hgnc_id={req.hgnc_id!r}" if req.hgnc_id
+        else f"entrez_gene_id={req.entrez_gene_id!r}" if req.entrez_gene_id
+        else f"uniprot_id={req.uniprot_id!r}" if req.uniprot_id
+        else f"symbol={req.symbol!r}" if req.symbol
+        else f"omim_id={req.omim_id!r}" if req.omim_id
+        else f"orphanet={req.orphanet!r}" if req.orphanet
+        else f"iuphar={req.iuphar!r}"
     )
-    return f"lookup_regulatory({ident})"
+    return f"lookup_gene({ident})"
 
 
 def print_router_decision(
@@ -1008,6 +1311,68 @@ def print_amass_results(
                 for ref in drug_refs[:3]:
                     lines.append(f"  · {escape(ref.get('name') or '(unnamed)')} {_amass_id(ref.get('amassId') or '?')}")
 
+    elif tool_name == "search_genes":
+        border = "yellow"
+        records = tool_result if isinstance(tool_result, list) else []
+        if not records:
+            lines.append("[dim](no records returned)[/dim]")
+        else:
+            lines.append(f"[dim]{len(records)} gene(s)[/dim]")
+            for i, r in enumerate(records, 1):
+                symbol = escape((r.get("symbol") or "(unknown)").strip())
+                name = escape((r.get("name") or "").strip())
+                gtype = escape(r.get("geneType") or "?")
+                loc = escape(r.get("location") or "?")
+                amass_id = r.get("amassId") or "?"
+                ensembl = r.get("ensemblGeneId") or "?"
+                lines.append(f" [bold]{i:>2}.[/bold] [bold]{symbol}[/bold]{f' — {name}' if name else ''}")
+                lines.append(f"     [dim]{gtype} · {loc}[/dim]")
+                lines.append(f"     {_amass_id(amass_id)} [dim]· {ensembl}[/dim]{_gene_intel_tags(r)}")
+
+    elif tool_name == "get_gene":
+        border = "yellow"
+        if isinstance(tool_result, dict) and "error" in tool_result and len(tool_result) == 1:
+            lines.append(f"[red]{escape(tool_result['error'])}[/red]")
+        elif isinstance(tool_result, dict):
+            r = tool_result
+            name = escape((r.get("name") or "").strip())
+            lines.append(f"[bold]{escape((r.get('symbol') or '(unknown)').strip())}[/bold]{f' — {name}' if name else ''}")
+            strand = r.get("strand") or ""
+            chrom = r.get("chromosome") or ""
+            loc_bits = " ".join(x for x in (chrom, strand) if x)
+            lines.append(
+                f"[dim]{escape(r.get('geneType') or '?')} · {escape(r.get('location') or '?')}"
+                f"{f' · chr {escape(loc_bits)}' if loc_bits else ''}[/dim]"
+            )
+            ids = [f"ENSG: {r.get('ensemblGeneId')}" if r.get("ensemblGeneId") else None,
+                   r.get("hgncId"),
+                   f"Entrez {r.get('entrezGeneId')}" if r.get("entrezGeneId") else None,
+                   f"UniProt {', '.join(r.get('uniprotIds') or [])}" if r.get("uniprotIds") else None]
+            id_str = escape(" · ".join(x for x in ids if x))
+            lines.append(f"{_amass_id(r.get('amassId') or '?')}{f' [dim]· {id_str}[/dim]' if id_str else ''}")
+            tags = _gene_intel_tags(r)
+            if tags:
+                lines.append(f"    {tags.strip()}")
+            tclass = r.get("targetClass") or {}
+            path = tclass.get("path") if isinstance(tclass, dict) else None
+            if path:
+                lines.append(f"target class: {escape(' › '.join(path))}")
+            protein = r.get("protein") or {}
+            struct = protein.get("structure") if isinstance(protein, dict) else None
+            fn = protein.get("function") if isinstance(protein, dict) else None
+            if isinstance(fn, dict) and fn.get("subcellularLocations"):
+                lines.append(f"localization: {escape(', '.join(fn['subcellularLocations'][:4]))}")
+            if isinstance(struct, dict) and struct.get("has3dStructure"):
+                pdbs = ", ".join(struct.get("pdbIds") or [])
+                lines.append(f"[green]3D structure: {escape(pdbs)}{f' (+{struct.get('pdbCount', 0) - 5} more)' if struct.get('pdbCount', 0) > 5 else ''}[/green]")
+            drug_refs = r.get("_referencesDrugCore") or []
+            if drug_refs:
+                lines.append(f"[green]cross-core: {len(drug_refs)} DrugCore reference(s) (drugs targeting this gene)[/green]")
+                for ref in drug_refs[:3]:
+                    dt = escape(ref.get("drugType") or "?")
+                    st = escape(ref.get("maxClinicalStage") or "?")
+                    lines.append(f"  · {escape(ref.get('name') or '(unnamed)')} [dim]({dt}, {st})[/dim] {_amass_id(ref.get('amassId') or '?')}")
+
     call_str = escape(_format_call(req))
     content = "\n".join(lines)
     console.print()
@@ -1068,6 +1433,15 @@ def _trim_for_scratch(tool_name: str, tool_result: Any) -> Any:
                 "moleculeType", "isOrphan", "designations", "authorizationsByAgency",
                 "_referencesDrugCore")
         return {k: tool_result.get(k) for k in keep if k in tool_result}
+    if tool_name == "search_genes" and isinstance(tool_result, list):
+        return [
+            {k: r.get(k) for k in ("amassId", "symbol", "name", "geneType", "ensemblGeneId") if k in r}
+            for r in tool_result
+        ]
+    if tool_name == "get_gene" and isinstance(tool_result, dict):
+        keep = ("amassId", "symbol", "name", "geneType", "ensemblGeneId", "hgncId",
+                "targetClass", "gnomadConstraint", "depmapEssentiality", "_referencesDrugCore")
+        return {k: tool_result.get(k) for k in keep if k in tool_result}
     return tool_result
 
 
@@ -1112,7 +1486,7 @@ async def turn(
 
         tool_name, tool_result = await dispatch(amass, route)
         print_amass_results(route, tool_name, tool_result)
-        if tool_name in ("search_papers", "search_trials", "search_drugs", "search_regulatory") and isinstance(tool_result, list):
+        if tool_name in ("search_papers", "search_trials", "search_drugs", "search_regulatory", "search_genes") and isinstance(tool_result, list):
             new_last_results = tool_result
         observations.append({
             "tool": tool_name,

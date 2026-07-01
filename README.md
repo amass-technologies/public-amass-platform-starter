@@ -1,6 +1,6 @@
 # Amass Platform Starter Agent
 
-An interactive agent for querying scientific literature, clinical trials, drugs/molecules, and FDA/EMA drug authorizations via the [amass platform](https://platform.amass.tech/) — across all four cores (BioMedCore, TrialCore, DrugCore, RegulatoryCore).
+An interactive agent for querying scientific literature, clinical trials, drugs/molecules, FDA/EMA drug authorizations, and genes/targets via the [amass platform](https://platform.amass.tech/) — across all five cores (BioMedCore, TrialCore, DrugCore, RegulatoryCore, GeneCore).
 Get your `AMASS_API_KEY` at https://platform.amass.tech/ and starter credits will be added to your account.
 
 > **Coding agent skills:** companion skills for Codex, GitHub Copilot, Claude Code and other agents are published at [amass-technologies/public-skills](https://github.com/amass-technologies/public-skills). Install the `amass-api` skill with or check the repository for examples of how to call the amass API from your own agents:
@@ -61,6 +61,9 @@ The router has a budget of 5 tool calls per turn. If exhausted, a nudge is injec
 | `search_regulatory` | RegulatoryCore | Cross-agency FDA + EMA authorization search (also full-text over labels/SmPCs/reviews/EPARs) |
 | `get_regulatory` | RegulatoryCore | Fetch an authorization by amass ID (`AMRC_...`), with US/EU cross-market link |
 | `lookup_regulatory` | RegulatoryCore | Resolve an FDA/EMA identifier (application number, product number, NDC, SPL set ID), then fetch |
+| `search_genes` | GeneCore | Search genes/targets, filter by biotype, target class, druggability, essentiality, and genetic constraint |
+| `get_gene` | GeneCore | Fetch a gene by amass ID (`AMGC_...`), fan out to the drugs that target it, opt into protein/structure |
+| `lookup_gene` | GeneCore | Resolve a gene identifier (Ensembl, HGNC, Entrez, UniProt, symbol, OMIM, Orphanet, IUPHAR), then fetch |
 
 ## Project structure
 

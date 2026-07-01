@@ -116,23 +116,60 @@ class LookupRegulatory {
   spl_set_id string? @description("FDA SPL Set ID (a UUID). Set exactly one identifier on this tool.")
 }
 
+class SearchGenes {
+  tool "search_genes" @description("Must be the literal string 'search_genes'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  query string @description("Free-text search across gene symbols, names, synonyms, gene families, RefSeq functional summaries, UniProt keywords, and ChEMBL target class. Use a gene symbol (e.g. 'EGFR'), gene family, or concept (e.g. 'tyrosine kinase', 'GPCR').")
+  limit int? @description("1 to 300, default 20.")
+  gene_type string? @description("One of PROTEIN_CODING, NCRNA, PSEUDO, TRNA, RRNA, SNRNA, SCRNA, SNORNA, MISCRNA, BIOLOGICAL_REGION, TRANSPOSON, OTHER. Set only when the user names a biotype.")
+  target_class string? @description("Top-level ChEMBL target class: one of ENZYME, MEMBRANE_RECEPTOR, ION_CHANNEL, TRANSPORTER, TRANSCRIPTION_FACTOR, EPIGENETIC_REGULATOR, SECRETED_PROTEIN, SURFACE_ANTIGEN, STRUCTURAL_PROTEIN, ADHESION, OTHER_CYTOSOLIC_PROTEIN, OTHER_NUCLEAR_PROTEIN, AUXILIARY_TRANSPORT_PROTEIN, UNCLASSIFIED_PROTEIN. Set only when the user names a target class (e.g. 'kinases' → ENZYME).")
+  tractability_modality string? @description("One of SMALL_MOLECULE, ANTIBODY, PROTAC, OTHER_CLINICAL. Set when the user asks about druggability by a specific modality.")
+  tractability_stage string? @description("One of APPROVED_DRUG, ADVANCED_CLINICAL, PHASE_1_CLINICAL. Set when the user asks for a clinical-precedent stage (e.g. 'with an approved drug' → APPROVED_DRUG).")
+  is_druggable bool? @description("True when the user asks for druggable targets (any small-molecule/antibody tractability bucket).")
+  is_essential bool? @description("True when the user asks for essential genes / cancer dependencies (DepMap-essential in at least one screen).")
+  has_safety_liabilities bool? @description("True when the user asks for genes with known target-safety liabilities.")
+  max_constraint_loeuf float? @description("Keep genes with gnomAD v4.0 LOEUF <= this value (lower = more loss-of-function constrained; gnomAD recommends < 0.6). Set only when the user asks for constrained / mutation-intolerant genes.")
+}
+
+class GetGene {
+  tool "get_gene" @description("Must be the literal string 'get_gene'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  amass_id string @description("Canonical AMGC_ id from a prior gene search result.")
+  include_protein bool? @description("Default false. Set true when the user asks about the protein: structure/PDB, subcellular localization, function summary, or biophysics (Swiss-Prot).")
+  include_references_drugcore bool? @description("Default false. Set true when the user asks which drugs target this gene. Fetches AMDC_ ids of DrugCore records that target the gene.")
+}
+
+class LookupGene {
+  tool "lookup_gene" @description("Must be the literal string 'lookup_gene'.")
+  thought string @description("One sentence on why this tool was chosen.")
+  ensembl_gene_id string? @description("Ensembl stable gene id, e.g. 'ENSG00000146648'. Set exactly one identifier on this tool.")
+  hgnc_id string? @description("HGNC id with the 'HGNC:' prefix, e.g. 'HGNC:3236'. Set exactly one identifier on this tool.")
+  entrez_gene_id string? @description("NCBI Entrez gene id, e.g. '1956'. Set exactly one identifier on this tool.")
+  uniprot_id string? @description("UniProt accession, e.g. 'P00533'. Set exactly one identifier on this tool.")
+  symbol string? @description("Approved gene symbol, e.g. 'EGFR'. Use for an exact-symbol lookup. Set exactly one identifier on this tool.")
+  omim_id string? @description("OMIM id, e.g. '131550'. Set exactly one identifier on this tool.")
+  orphanet string? @description("Orphanet id, e.g. '30815'. Set exactly one identifier on this tool.")
+  iuphar string? @description("IUPHAR/Guide to Pharmacology target id, e.g. '1797'. Set exactly one identifier on this tool.")
+}
+
 class FinalAnswer {
   tool "final_answer" @description("Must be the literal string 'final_answer'. Use when no tool is needed or when prior tool results already answer the user.")
   thought string @description("One sentence on why no further tool call is needed.")
   answer string @description("The user-facing reply.")
 }
 
-function RouteQuery(user_query: string, history: string, last_results: string, scratch: string) -> SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | SearchDrugs | GetDrug | LookupDrug | SearchRegulatory | GetRegulatory | LookupRegulatory | FinalAnswer {
+function RouteQuery(user_query: string, history: string, last_results: string, scratch: string) -> SearchPapers | GetPaper | SearchTrials | GetTrial | LookupPaper | LookupTrial | SearchDrugs | GetDrug | LookupDrug | SearchRegulatory | GetRegulatory | LookupRegulatory | SearchGenes | GetGene | LookupGene | FinalAnswer {
   client MyAnthropicHaikuFallbackToOpenAIMiniToGoogle
   prompt #"
     {{ _.role("system") }}
     You are the router for an agent that may call multiple tools per user turn against the amass
     platform before emitting a final answer. On each step you pick one tool to run OR pick
-    final_answer to stop. The platform exposes four cores:
+    final_answer to stop. The platform exposes five cores:
       - BioMedCore     (search_papers / get_paper / lookup_paper)         — published scientific literature.
       - TrialCore      (search_trials / get_trial / lookup_trial)          — clinical trials on ClinicalTrials.gov.
       - DrugCore       (search_drugs / get_drug / lookup_drug)             — drugs & molecules (modality, clinical stage, structure), from ChEMBL.
       - RegulatoryCore (search_regulatory / get_regulatory / lookup_regulatory) — FDA + EMA drug authorizations on a shared schema.
+      - GeneCore       (search_genes / get_gene / lookup_gene)             — harmonized genes (HGNC + NCBI) enriched with Open Targets target intelligence.
 
     CRITICAL — read the scratchpad FIRST on every step:
       - The scratchpad lists every tool call already made this turn together with its result.
@@ -190,6 +227,20 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - lookup_regulatory: resolve an FDA/EMA identifier to a RegulatoryCore record. Set exactly one
         of fda_application_number (e.g. BLA125514), ema_product_number (e.g. EMEA/H/C/003820), ndc
         (e.g. 0169-4404), or spl_set_id (a UUID).
+      - search_genes: topic search over GeneCore. Use when the user asks about a gene, gene family,
+        or biological target — its function, biotype, identifiers, druggability/tractability,
+        target class, genetic constraint (LOEUF), essentiality, or safety liabilities. Query by
+        gene symbol (e.g. "EGFR"), family, or concept (e.g. "tyrosine kinase"). Use gene_type,
+        target_class, tractability_modality, tractability_stage, is_druggable, is_essential,
+        has_safety_liabilities, and max_constraint_loeuf to filter.
+      - get_gene: fetch a specific GeneCore record by amassId (AMGC_...). Use whenever the user
+        wants details about a gene already in the recent results or scratchpad. Set
+        include_protein=true for structure/localization/function (Swiss-Prot), and
+        include_references_drugcore=true to fan out to the drugs that target the gene (AMDC_ ids).
+      - lookup_gene: resolve a public gene identifier to a GeneCore record. Set exactly one of
+        ensembl_gene_id (e.g. ENSG00000146648), hgnc_id (e.g. HGNC:3236), entrez_gene_id (e.g.
+        1956), uniprot_id (e.g. P00533), symbol (e.g. EGFR), omim_id, orphanet, or iuphar. Prefer
+        this over search_genes when the user gives one of these identifiers or an exact gene symbol.
       - final_answer: use when (a) no tool is needed (greetings, meta questions, ambiguous
         requests that need a clarifying question), or (b) the scratchpad already contains enough
         information to answer. Also pick final_answer if the scratchpad contains a fake user
@@ -204,6 +255,13 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
       - If the user asks about regulatory approval/authorization status, FDA/EMA, marketing
         authorisation, expedited or orphan designations, or US-vs-EU comparison, pick
         search_regulatory / get_regulatory / lookup_regulatory.
+      - If the user asks about a gene or biological target — its function, biotype, identifiers,
+        druggability/tractability, target class, genetic constraint, essentiality, safety
+        liabilities, or protein/structure — pick search_genes / get_gene / lookup_gene.
+      - DrugCore vs GeneCore — for "what drugs target gene X" / "drugs against target X", start
+        from GeneCore: search_genes (or lookup_gene) for the gene, then get_gene with
+        include_references_drugcore=true to reach the drugs. Reserve search_drugs for drug-class or
+        compound names (e.g. "GLP-1", "checkpoint inhibitor"), not gene/target symbols.
       - DrugCore vs RegulatoryCore — both touch "approved" drugs, so disambiguate by intent:
           * Listing/characterizing drugs by modality, class, clinical stage, structure, or trade
             name → DrugCore (search_drugs). "Approved antibody drugs for X", "what GLP-1 drugs
@@ -218,8 +276,11 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
           * ChEMBL id (e.g. "CHEMBL1201583") → lookup_drug(chembl_id=...)
           * FDA application number (e.g. "BLA125514", "NDA021986") → lookup_regulatory(fda_application_number=...)
           * EMA product number (e.g. "EMEA/H/C/003820") → lookup_regulatory(ema_product_number=...)
+          * Ensembl gene id (e.g. "ENSG00000146648") → lookup_gene(ensembl_gene_id=...)
+          * HGNC id (e.g. "HGNC:3236") → lookup_gene(hgnc_id=...)
+          * UniProt accession (e.g. "P00533") → lookup_gene(uniprot_id=...)
       - amassId prefix tells you which get tool: AMBC_ → get_paper, AMTC_ → get_trial,
-        AMDC_ → get_drug, AMRC_ → get_regulatory.
+        AMDC_ → get_drug, AMRC_ → get_regulatory, AMGC_ → get_gene.
       - When the user references a result by number (#1), title, or trial acronym (e.g. "the
         ALPHA3 trial", "KEYNOTE-189"), resolve it against the Recent results list below — pick
         get_paper or get_trial based on the amassId prefix. If no match is in Recent results,
@@ -262,14 +323,26 @@ function RouteQuery(user_query: string, history: string, last_results: string, s
             → lookup_drug chembl_id: "CHEMBL1201583"
           * user: "Resolve FDA application BLA125514"
             → lookup_regulatory fda_application_number: "BLA125514"
+          * user: "Which essential kinases are heavily constrained against loss-of-function?"
+            → search_genes query: "kinase", target_class: "ENZYME", is_essential: true, max_constraint_loeuf: 0.6
+          * user: "Tell me about the EGFR gene"
+            → lookup_gene symbol: "EGFR"
+          * user: "What drugs target EGFR?" (start from the gene, then fan out)
+            → search_genes query: "EGFR"  (then get_gene amass_id: "AMGC_...", include_references_drugcore: true)
+          * user: "Show me the structure and localization of #1" (after a gene search)
+            → get_gene amass_id: "AMGC_...", include_protein: true
+          * user: "Look up ENSG00000146648"
+            → lookup_gene ensembl_gene_id: "ENSG00000146648"
       - Leave min_journal_quality, min_publication_date, max_publication_date, and
         min_citation_count (search_papers); phase / overall_status / study_type /
         sponsor_type / intervention_type / facility_countries / min_start_date /
         max_start_date / min_completion_date / max_completion_date / min_enrollment /
         has_results (search_trials); drug_type / max_clinical_stage (search_drugs); and
         agency / molecule_type / authorization_status / has_designation / is_orphan /
-        min_authorization_date / max_authorization_date (search_regulatory) null unless the
-        user's phrasing explicitly calls for them.
+        min_authorization_date / max_authorization_date (search_regulatory); and
+        gene_type / target_class / tractability_modality / tractability_stage / is_druggable /
+        is_essential / has_safety_liabilities / max_constraint_loeuf (search_genes) null unless
+        the user's phrasing explicitly calls for them.
         Do NOT apply filters just because the topic sounds foundational or important.
       - Never invent an amassId; only use IDs that appear in the Recent results block or the
         scratchpad.
@@ -300,7 +373,7 @@ function SummarizeResult(user_query: string, history: string, observations_json:
     are a JSON array — each element represents one tool call made during this user turn and has
     three fields: tool (the tool name), call (a human-readable call signature), and result (the
     trimmed tool output). Tools come from BioMedCore (papers), TrialCore (clinical trials),
-    DrugCore (drugs/molecules), or RegulatoryCore (FDA/EMA authorizations).
+    DrugCore (drugs/molecules), RegulatoryCore (FDA/EMA authorizations), or GeneCore (genes).
     Multiple observations may appear when the agent chained calls (e.g. search_trials then
     get_trial on the top hit).
 
@@ -374,6 +447,23 @@ function SummarizeResult(user_query: string, history: string, observations_json:
           entry: <agency> — <name> (<authorizationStatus>) — AMRC_...
           fdaDetails / emaDetails: surface the agency-specific fields when present.
           If "_referencesDrugCore" is present, list the active-ingredient DrugCore records.
+      - search_genes: produce a numbered list (1., 2., ...) with, per gene:
+          <symbol> — <name> (<geneType>)
+          amassId: AMGC_...   Ensembl: ENSG...   location: <location or dash>
+          One-sentence note from the summary if it adds info. If target intelligence is present,
+          add a short tag: druggable / essential / LOEUF <lossOfFunction.loeuf> / target class.
+        After the list, give a 1-2 sentence synthesis answering the user's question.
+      - get_gene / lookup_gene: produce a structured summary:
+          Symbol, name, synonyms (cap at 4), geneType, location / chromosome / strand,
+          identifiers (Ensembl, HGNC, Entrez, UniProt), amassId.
+          Summary: the RefSeq functional description if present.
+          Target intelligence (when present): tractability modalities with clinical buckets;
+          targetClass path; gnomAD constraint (LOEUF = lossOfFunction.loeuf, pLI); DepMap
+          essentiality (isEssential + dependent/tested cell lines).
+          Protein (when the result has a "protein" object): subcellular locations, whether a 3D
+          structure exists (a few PDB ids), function summary.
+          Cross-core: if "_referencesDrugCore" is present, render "Drugs targeting this gene
+          (from DrugCore):" with one line per drug — <name> (<drugType>, <maxClinicalStage>) — AMDC_...
 
     When multiple observations are present, render them in the order they were made. If a later
     observation drills into a result from an earlier one (e.g. get_trial on #1 of a prior
@@ -731,5 +821,73 @@ test TestSummarizeMultiTool {
     user_query "Find recruiting Phase 3 lung cancer drug trials and give me details on the top one."
     history ""
     observations_json "[{\"tool\":\"search_trials\",\"call\":\"search_trials(query='lung cancer', phase=PHASE3, overall_status=RECRUITING, intervention_type=DRUG, limit=10)\",\"result\":[{\"amassId\":\"AMTC_ex001\",\"nctId\":\"NCT05000001\",\"briefTitle\":\"Pembrolizumab vs Chemo in NSCLC\",\"sponsorName\":\"Merck\",\"phase\":\"PHASE3\",\"overallStatus\":\"RECRUITING\",\"enrollment\":1200,\"facilityCountries\":[\"US\",\"DE\"]},{\"amassId\":\"AMTC_ex002\",\"nctId\":\"NCT05000002\",\"briefTitle\":\"Osimertinib in EGFRm NSCLC\",\"sponsorName\":\"AstraZeneca\",\"phase\":\"PHASE3\",\"overallStatus\":\"RECRUITING\",\"enrollment\":850,\"facilityCountries\":[\"US\",\"JP\"]}]},{\"tool\":\"get_trial\",\"call\":\"get_trial(amass_id='AMTC_ex001')\",\"result\":{\"amassId\":\"AMTC_ex001\",\"nctId\":\"NCT05000001\",\"briefTitle\":\"Pembrolizumab vs Chemo in NSCLC\",\"sponsorName\":\"Merck\",\"phase\":\"PHASE3\",\"overallStatus\":\"RECRUITING\",\"studyType\":\"INTERVENTIONAL\",\"enrollment\":1200,\"conditions\":[\"Non-Small Cell Lung Cancer\"],\"interventionTypes\":[\"DRUG\",\"DRUG\"],\"interventionNames\":[\"Pembrolizumab\",\"Platinum-doublet chemotherapy\"],\"primaryOutcomeMeasures\":[\"Progression-Free Survival\",\"Overall Survival\"],\"designAllocation\":\"RANDOMIZED\",\"designInterventionModel\":\"PARALLEL\",\"designPrimaryPurpose\":\"TREATMENT\"}}]"
+  }
+}
+
+test TestRouteSearchGenesConstraint {
+  functions [RouteQuery]
+  args {
+    user_query "Which essential kinases are heavily constrained against loss-of-function?"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteLookupGeneSymbol {
+  functions [RouteQuery]
+  args {
+    user_query "Tell me about the EGFR gene"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteLookupGeneEnsembl {
+  functions [RouteQuery]
+  args {
+    user_query "Look up ENSG00000146648"
+    history ""
+    last_results ""
+    scratch ""
+  }
+}
+
+test TestRouteGetGeneWithDrugRefs {
+  functions [RouteQuery]
+  args {
+    user_query "What drugs target #1?"
+    history "user: Find druggable kinases\nassistant: (lists 3 genes)"
+    last_results "1. EGFR — epidermal growth factor receptor (PROTEIN_CODING) — AMGC_example001\n2. JAK2 — Janus kinase 2 (PROTEIN_CODING) — AMGC_example002\n3. MTOR — mechanistic target of rapamycin kinase (PROTEIN_CODING) — AMGC_example003"
+    scratch ""
+  }
+}
+
+test TestRouteGetGeneProtein {
+  functions [RouteQuery]
+  args {
+    user_query "Show me the structure and subcellular localization of #3"
+    history "user: Find druggable kinases\nassistant: (lists 3 genes)"
+    last_results "1. EGFR — epidermal growth factor receptor (PROTEIN_CODING) — AMGC_example001\n2. JAK2 — Janus kinase 2 (PROTEIN_CODING) — AMGC_example002\n3. MTOR — mechanistic target of rapamycin kinase (PROTEIN_CODING) — AMGC_example003"
+    scratch ""
+  }
+}
+
+test TestSummarizeSearchGenes {
+  functions [SummarizeResult]
+  args {
+    user_query "Which essential kinases are heavily constrained against loss-of-function?"
+    history ""
+    observations_json "[{\"tool\":\"search_genes\",\"call\":\"search_genes(query='kinase', target_class=ENZYME, is_essential=True, max_constraint_loeuf=0.6)\",\"result\":[{\"amassId\":\"AMGC_ex001\",\"ensemblGeneId\":\"ENSG00000198793\",\"symbol\":\"MTOR\",\"name\":\"mechanistic target of rapamycin kinase\",\"geneType\":\"PROTEIN_CODING\",\"location\":\"1p36.22\",\"summary\":\"Serine/threonine kinase that regulates cell growth and metabolism.\",\"gnomadConstraint\":{\"lossOfFunction\":{\"loeuf\":0.09,\"pli\":1.0}},\"depmapEssentiality\":{\"isEssential\":true,\"cellLinesTested\":842,\"dependentCellLines\":712}},{\"amassId\":\"AMGC_ex002\",\"ensemblGeneId\":\"ENSG00000175054\",\"symbol\":\"ATR\",\"name\":\"ATR serine/threonine kinase\",\"geneType\":\"PROTEIN_CODING\",\"location\":\"3q23\",\"gnomadConstraint\":{\"lossOfFunction\":{\"loeuf\":0.14,\"pli\":1.0}},\"depmapEssentiality\":{\"isEssential\":true,\"cellLinesTested\":842,\"dependentCellLines\":684}}]}]"
+  }
+}
+
+test TestSummarizeGetGeneWithDrugRefs {
+  functions [SummarizeResult]
+  args {
+    user_query "Tell me about EGFR and what drugs target it, including its structure"
+    history ""
+    observations_json "[{\"tool\":\"get_gene\",\"call\":\"get_gene(amass_id='AMGC_ex001', include_protein=True, include_references_drugcore=True)\",\"result\":{\"amassId\":\"AMGC_ex001\",\"ensemblGeneId\":\"ENSG00000146648\",\"symbol\":\"EGFR\",\"name\":\"epidermal growth factor receptor\",\"synonyms\":[\"ERBB\",\"ERBB1\",\"HER1\"],\"geneType\":\"PROTEIN_CODING\",\"location\":\"7p11.2\",\"chromosome\":\"7\",\"strand\":\"+\",\"entrezGeneId\":\"1956\",\"hgncId\":\"HGNC:3236\",\"uniprotIds\":[\"P00533\"],\"summary\":\"Receptor tyrosine kinase binding EGF; drives proliferation and is frequently mutated in NSCLC.\",\"targetClass\":{\"path\":[\"Enzyme\",\"Kinase\",\"Protein Kinase\"]},\"gnomadConstraint\":{\"lossOfFunction\":{\"loeuf\":0.28,\"pli\":0.98}},\"depmapEssentiality\":{\"isEssential\":true,\"cellLinesTested\":842,\"dependentCellLines\":114},\"protein\":{\"function\":{\"subcellularLocations\":[\"Cell membrane\",\"Endosome\"],\"functionSummary\":\"Receptor tyrosine-protein kinase.\"},\"structure\":{\"has3dStructure\":true,\"pdbIds\":[\"1IVO\",\"1M14\",\"2ITY\"]}},\"_referencesDrugCore\":[{\"amassId\":\"AMDC_ex001\",\"name\":\"Osimertinib\",\"drugType\":\"SMALL_MOLECULE\",\"maxClinicalStage\":\"APPROVAL\"},{\"amassId\":\"AMDC_ex002\",\"name\":\"Amivantamab\",\"drugType\":\"ANTIBODY\",\"maxClinicalStage\":\"APPROVAL\"}]}}]"
   }
 }

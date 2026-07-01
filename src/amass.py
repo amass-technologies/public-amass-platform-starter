@@ -1,4 +1,4 @@
-"""Async client for the amass platform API (BioMedCore + TrialCore + DrugCore + RegulatoryCore)."""
+"""Async client for the amass platform API (BioMedCore + TrialCore + DrugCore + RegulatoryCore + GeneCore)."""
 
 from __future__ import annotations
 
@@ -324,6 +324,75 @@ class AmassClient:
             raise
         return data if isinstance(data, dict) else None
 
+    async def search_genes(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        gene_type: str | None = None,
+        target_class: str | None = None,
+        tractability_modality: str | None = None,
+        tractability_stage: str | None = None,
+        is_druggable: bool | None = None,
+        is_essential: bool | None = None,
+        has_safety_liabilities: bool | None = None,
+        max_constraint_loeuf: float | None = None,
+        include: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search GeneCore (harmonized genes from HGNC + NCBI, enriched with Open Targets
+        target intelligence).
+
+        The enum filters (`gene_type`, `target_class`, `tractability_modality`,
+        `tractability_stage`) accept a single value here; the API supports repeating each param
+        for OR semantics, but the starter keeps one value per filter for simplicity.
+        """
+        params: list[tuple[str, str]] = [
+            ("query", query),
+            ("limit", str(max(1, min(limit, 300)))),
+        ]
+        if gene_type:
+            params.append(("geneType", gene_type))
+        if target_class:
+            params.append(("targetClass", target_class))
+        if tractability_modality:
+            params.append(("tractabilityModality", tractability_modality))
+        if tractability_stage:
+            params.append(("tractabilityStage", tractability_stage))
+        if is_druggable is not None:
+            params.append(("isDruggable", "true" if is_druggable else "false"))
+        if is_essential is not None:
+            params.append(("isEssential", "true" if is_essential else "false"))
+        if has_safety_liabilities is not None:
+            params.append(("hasSafetyLiabilities", "true" if has_safety_liabilities else "false"))
+        if max_constraint_loeuf is not None:
+            params.append(("maxConstraintLoeuf", str(max_constraint_loeuf)))
+        for inc in include or ():
+            params.append(("include", inc))
+        data = await self._request("GET", "/cores/genecore/records", params=params)
+        return data if isinstance(data, list) else []
+
+    async def get_gene(
+        self,
+        amass_id: str,
+        *,
+        include_protein: bool = False,
+        include_references_drugcore: bool = False,
+    ) -> dict[str, Any] | None:
+        params: list[tuple[str, str]] = []
+        if include_protein:
+            params.append(("include", "protein"))
+        if include_references_drugcore:
+            params.append(("include", "referencesDrugCore"))
+        try:
+            data = await self._request(
+                "GET", f"/cores/genecore/records/{amass_id}", params=params
+            )
+        except AmassError as e:
+            if "404" in str(e):
+                return None
+            raise
+        return data if isinstance(data, dict) else None
+
     async def lookup_drugs(self, items: list[dict[str, str]]) -> list[dict[str, Any]]:
         """POST /cores/drugcore/records/lookup. Each item: chemblId."""
         data = await self._request(
@@ -342,6 +411,18 @@ class AmassClient:
         fdaApplicationNumber, emaProductNumber, ndc, or splSetId."""
         data = await self._request(
             "POST", "/cores/regulatorycore/records/lookup", json_body={"items": items}
+        )
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return data["items"]
+        return []
+
+    async def lookup_genes(self, items: list[dict[str, str]]) -> list[dict[str, Any]]:
+        """POST /cores/genecore/records/lookup. Each item: exactly one of ensemblGeneId,
+        hgncId, entrezGeneId, uniprotId, symbol, omimId, orphanet, or iuphar."""
+        data = await self._request(
+            "POST", "/cores/genecore/records/lookup", json_body={"items": items}
         )
         if isinstance(data, list):
             return data
